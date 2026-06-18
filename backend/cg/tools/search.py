@@ -671,6 +671,9 @@ def unwrap_duckduckgo_url(href: str) -> str:
 
 def normalize_url(url: str) -> str:
     parsed = urlparse(url)
+    # 本地文件路径（学术论文）
+    if url.startswith("/") or url.startswith("./"):
+        return url
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return ""
     return parsed._replace(fragment="").geturl().rstrip("/")
