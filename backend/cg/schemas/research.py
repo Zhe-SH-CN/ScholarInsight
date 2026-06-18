@@ -9,22 +9,39 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 
 DEFAULT_DIMENSIONS = [
-    "positioning",
-    "feature",
-    "pricing",
-    "user_voice",
-    "enterprise",
-    "strategy",
+    "gap_driven_reframing",
+    "cross_domain_synthesis",
+    "representation_shift",
+    "modular_pipeline_composition",
+    "data_evaluation_engineering",
+    "principled_probabilistic_modeling",
+    "formal_experimental_tightening",
+    "approximation_engineering",
+    "inference_time_control",
+    "structural_inductive_bias",
+    "multiscale_hierarchical_modeling",
+    "mechanistic_decomposition",
+    "adversary_modeling",
+    "numerics_systems_codesign",
+    "data_centric_optimization",
 ]
 
 DIMENSION_LABELS: dict[str, str] = {
-    "positioning": "产品定位",
-    "feature": "核心功能",
-    "pricing": "定价策略",
-    "user_voice": "用户口碑",
-    "enterprise": "企业化能力",
-    "strategy": "机会与战略",
-    "gtm": "增长与渠道",
+    "gap_driven_reframing": "痛点驱动重构",
+    "cross_domain_synthesis": "跨领域综合",
+    "representation_shift": "表征转换",
+    "modular_pipeline_composition": "模块化管线",
+    "data_evaluation_engineering": "数据评估工程",
+    "principled_probabilistic_modeling": "概率建模",
+    "formal_experimental_tightening": "理论实验迭代",
+    "approximation_engineering": "近似工程",
+    "inference_time_control": "推理时控制",
+    "structural_inductive_bias": "结构归纳偏置",
+    "multiscale_hierarchical_modeling": "多尺度分层",
+    "mechanistic_decomposition": "机制分解",
+    "adversary_modeling": "对抗建模",
+    "numerics_systems_codesign": "数值系统协同",
+    "data_centric_optimization": "数据中心优化",
     "other": "其他",
 }
 
@@ -32,13 +49,13 @@ DIMENSION_LABELS: dict[str, str] = {
 class ResearchRequest(BaseModel):
     """User-facing request for a real research run."""
 
-    project_name: str = Field(default="AI 编程助手竞品研究", min_length=1, max_length=120)
-    target_product: str = Field(default="Trae", min_length=1, max_length=80)
+    project_name: str = Field(default="论文推理模式分析", min_length=1, max_length=120)
+    target_product: str = Field(default="Retrieval-Augmented Generation", min_length=1, max_length=80)
     product_description: str = Field(default="", max_length=300)
-    competitors: list[str] = Field(default_factory=lambda: ["Cursor", "GitHub Copilot", "Windsurf"])
+    competitors: list[str] = Field(default_factory=lambda: [])
     analysis_dimensions: list[str] = Field(default_factory=lambda: DEFAULT_DIMENSIONS.copy())
     research_goal: str = Field(
-        default="分析目标产品与竞品的公开资料，形成可溯源证据、结论与报告。", max_length=1000
+        default="分析该研究方向中论文之间的创新关系和推理模式分布", max_length=1000
     )
     seed_urls: list[str] = Field(default_factory=list)
     max_sources: int = Field(default=150, ge=1, le=1000)
@@ -141,6 +158,9 @@ class Evidence(BaseModel):
     source_url: str
     source_id: str | None = None
     confidence: float = Field(default=0.5, ge=0, le=1)
+    reasoning_pattern: str = ""
+    bottleneck: str = ""
+    mechanism: str = ""
     authority_score: float = Field(default=0.5, ge=0, le=1)
     freshness_score: float = Field(default=0.5, ge=0, le=1)
     relevance_score: float = Field(default=0.5, ge=0, le=1)

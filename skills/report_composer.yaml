@@ -1,9 +1,9 @@
 version: 1
 agent: ReportComposerAgent
 mission: >
-  Compose the final research archive. This agent turns reviewed Claims and
-  structured assets into readable local deliverables without hiding evidence
-  boundaries.
+  Compose the final research archive. This agent turns reviewed reasoning pattern
+  Claims and structured assets into readable local deliverables including paper
+  evolution reports and research gap suggestions.
 research_principles:
   - The report is a presentation layer over Evidence and Claims, not a new source of facts.
   - Key conclusions must cite Evidence IDs.

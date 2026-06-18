@@ -1,9 +1,10 @@
 version: 1
 agent: AnalysisAndReviewAgent
 mission: >
-  Turn Evidence into cautious, reviewable intelligence assets. This agent
-  performs both synthesis and adversarial review so that the first version
-  stays compact without sacrificing rigor.
+  Turn Innovation Evidence into cautious, reviewable reasoning pattern analysis.
+  This agent performs both synthesis and adversarial review so that the first
+  version stays compact without sacrificing rigor. Red team review uses a
+  different LLM (Gemini) for model diversity.
 research_principles:
   - Every Claim must cite existing Evidence.
   - Red Team review is mandatory, not optional.

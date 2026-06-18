@@ -23,6 +23,8 @@ class Settings(BaseSettings):
     )
 
     # --- LLM ---
+    mimo_api_key: str = ""
+    mimo_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     qwen_api_key: str = ""
@@ -36,6 +38,10 @@ class Settings(BaseSettings):
     cg_llm_min_interval_seconds: float = Field(default=1.2, ge=0, le=30)
     cg_llm_max_retries: int = Field(default=3, ge=0, le=8)
     cg_llm_rate_limit_cooldown_seconds: float = Field(default=12.0, ge=1, le=120)
+
+    # --- ScholarInsight ---
+    scholar_paper_index_path: str = "data/paper_index.json"
+    scholar_local_papers_dir: str = "/home/zsz/papers/"
 
     # --- 搜索 ---
     serper_api_key: str = ""
@@ -124,6 +130,7 @@ class Settings(BaseSettings):
             "ark": self.ark_api_key,
             "deepseek": self.deepseek_api_key,
             "qwen": self.qwen_api_key,
+            "mimo": self.mimo_api_key,
         }
         key = provider_keys.get(provider, self.deepseek_api_key)
         key = key.strip()
@@ -138,6 +145,7 @@ class Settings(BaseSettings):
             "ark": self.ark_base_url,
             "deepseek": self.deepseek_base_url,
             "qwen": self.qwen_base_url,
+            "mimo": self.mimo_base_url,
         }
         return provider_base_urls.get(provider, self.deepseek_base_url)
 

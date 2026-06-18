@@ -57,6 +57,7 @@ from cg.schemas.research import (
 from cg.settings import Settings, get_settings
 from cg.tools.fetcher import Fetcher, RawPage
 from cg.tools.search import SearchTool, classify_source
+from cg.tools.local_paper_search import LocalPaperSearchTool
 
 
 DIMENSION_KEYWORDS: dict[str, list[str]] = {
@@ -147,7 +148,7 @@ class ResearchPipeline:
     def __init__(self, settings: Settings | None = None):
         self.settings = settings or get_settings()
         self.runs = RunRepository(self.settings.data_dir)
-        self.search = SearchTool(self.settings)
+        self.search = LocalPaperSearchTool(self.settings)
         self.fetcher = Fetcher(self.settings)
         self.llm = LLMClient(self.settings)
 

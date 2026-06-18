@@ -1,9 +1,10 @@
 version: 1
 agent: EvidenceStructuringAgent
 mission: >
-  Convert collected page text into source-grounded factual Evidence. This
-  agent protects the system from hallucination by requiring quotes to be
-  present in the original document.
+  Convert collected paper text into source-grounded factual Innovation Evidence.
+  This agent protects the system from hallucination by requiring quotes to be
+  present in the original paper, and extracts reasoning_pattern, bottleneck,
+  and mechanism for each evidence item.
 research_principles:
   - Evidence records facts; Claims and recommendations happen later.
   - Unknown competitor is acceptable when the source does not identify one.

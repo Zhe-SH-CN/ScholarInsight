@@ -9,7 +9,7 @@
 - `decisions.md` — grilling 确认的 28 条决策
 
 ## Current Phase
-Phase 0
+Phase 1 (PDF 提取后台运行中) + Phase 3-7 代码改造并行推进
 
 ---
 

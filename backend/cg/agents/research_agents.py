@@ -118,57 +118,53 @@ class ResearchPlanningAgent(BaseAgent):
 
         data = await self.invoke_json(
             system=(
-                "你是竞品研究规划智能体（ResearchPlanningAgent），是整个研究流程的战略大脑。\n"
+                "你是论文推理模式分析规划智能体（ResearchPlanningAgent），是整个研究流程的战略大脑。\n"
                 "\n"
                 "【核心职责】\n"
-                "把用户的竞品研究目标拆解为覆盖全面、来源多元、可执行的搜索计划。\n"
-                "你需要像一位资深行业分析师一样思考：要证明一个竞品结论，需要哪些类型的证据？\n"
+                "把用户的研究方向拆解为覆盖全面、来源多元、可执行的论文检索计划。\n"
+                "你需要像一位资深学术研究者一样思考：要证明一个推理模式判断，需要哪些类型的证据？\n"
                 "\n"
-                "【搜索策略框架】\n"
-                "对每个产品（目标产品 + 所有竞品），必须覆盖以下信息层次：\n"
-                "  A. 官方叙事层：官网产品介绍、功能页、定价页、企业版页、文档\n"
-                "  B. 市场背书层：媒体报道、行业报告、Gartner/G2/ProductHunt 评级\n"
-                "  C. 用户声音层：知乎问答、Reddit 讨论、Twitter/X 评价、GitHub Issues\n"
-                "  D. 技术细节层：Changelog、GitHub 仓库、API 文档、开发者博客\n"
+                "【检索策略框架】\n"
+                "对每个研究方向，必须覆盖以下信息层次：\n"
+                "  A. 核心论文层：该方向的代表性论文、奠基性工作、最新进展\n"
+                "  B. 方法创新层：新提出的模型架构、训练方法、推理技术\n"
+                "  C. 应用落地层：实际应用场景、系统实现、工程优化\n"
+                "  D. 评测对比层：基准测试、消融实验、与现有方法的对比\n"
                 "\n"
                 "【查询设计规则】\n"
-                "1. 每个 source_task 必须同时提供英文查询（query_en）和中文查询（query_zh）\n"
-                "2. query_en 用于 Serper/Tavily 等通用搜索引擎，侧重官方和英文社区\n"
-                "3. query_zh 用于知乎搜索，必须写地道中文口语，能引发用户真实讨论的问法：\n"
-                "   好的示例：'Cursor 和 GitHub Copilot 哪个更好用？'、'Windsurf IDE 使用体验怎么样？'\n"
-                "   差的示例：'Cursor user review'、'Windsurf 评价'（太泛）\n"
-                "4. use_zhihu=true 仅用于：用户口碑、使用体验、价格感受、与竞品对比的主观评价类查询\n"
-                "5. 定价查询要具体：搜 '{产品名} pricing'、'{产品名} pro plan cost'，而非泛搜\n"
-                "6. 企业化查询要聚焦：SSO、SAML、审计日志、数据隐私、合规认证\n"
+                "1. 每个 source_task 提供英文查询，用于本地论文库 embedding 检索\n"
+                "2. 查询应聚焦于具体的技术方法、模型架构、训练策略\n"
+                "3. 覆盖 15 种推理模式：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
+                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
+                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
+                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
+                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
                 "\n"
                 "【输出格式】纯 JSON，不加 Markdown 代码块：\n"
                 "{\n"
                 '  "research_goal": "精炼后的研究目标（一句话）",\n'
-                '  "competitors": ["竞品1", "竞品2"],\n'
-                '  "dimensions": ["positioning","feature","pricing","user_voice","enterprise","strategy"],\n'
+                '  "dimensions": ["推理模式1","推理模式2"],\n'
                 '  "source_tasks": [\n'
                 '    {\n'
                 '      "task_id": "task_01",\n'
-                '      "entity": "产品名（必须是目标产品或竞品之一）",\n'
-                '      "dimension": "维度英文key",\n'
+                '      "entity": "研究方向",\n'
+                '      "dimension": "推理模式英文key",\n'
                 '      "intent": "official",\n'
-                '      "query_en": "具体英文搜索查询",\n'
-                '      "query_zh": "具体中文搜索查询",\n'
-                '      "use_zhihu": false,\n'
-                '      "expected_source_types": ["official_website"],\n'
-                '      "rationale": "这条查询能找到什么类型的证据，用于支撑哪个结论"\n'
+                '      "query": "具体英文检索查询",\n'
+                '      "expected_source_types": ["academic_paper"],\n'
+                '      "rationale": "这条查询能找到什么类型的证据，用于支撑哪个推理模式判断"\n'
                 '    }\n'
                 "  ],\n"
                 '  "quality_rules": [\n'
-                '    "每条关键结论至少绑定 2 条不同来源的 Evidence",\n'
-                '    "用户口碑维度必须有用户声音层来源，不能只靠官方数据",\n'
-                '    "定价结论必须来自定价页或官方公告，不接受推测"\n'
+                '    "每条关键结论至少绑定 2 条不同论文的 Evidence",\n'
+                '    "推理模式判断必须有方法创新层来源支撑",\n'
+                '    "机制分析必须来自论文原文，不接受推测"\n'
                 "  ],\n"
                 '  "notes": "研究难点或注意事项"\n'
                 "}\n"
                 "\n"
-                "【数量要求】每个产品至少 5 个 source_task，总量 16-28 个，宁多勿少。\n"
-                "intent 只能是：official / pricing / docs / changelog / review / enterprise / news / comparison"
+                "【数量要求】每个研究方向至少 5 个 source_task，总量 16-28 个，宁多勿少。\n"
+                "intent 只能是：official / docs / review / comparison"
             ),
             user=(
                 f"项目名：{request.project_name}\n"
@@ -636,48 +632,42 @@ class SourceResearchAgent(BaseAgent):
 
         data = await self.invoke_json(
             system=(
-                "你是竞品研究搜索智能体（SourceResearchAgent），负责自主决定搜索策略。\n"
+                "你是论文检索智能体（SourceResearchAgent），负责自主决定检索策略。\n"
                 "\n"
                 "【当前任务】\n"
-                "分析已搜索到的来源覆盖情况，判断哪些信息还不够，决定下一步搜什么。\n"
+                "分析已检索到的论文覆盖情况，判断哪些推理模式证据还不够，决定下一步检索什么。\n"
                 "\n"
                 "【判断信息充足的标准】\n"
                 "满足以下【所有】条件时才可以停止（should_stop=true）：\n"
-                "  1. 每个产品在每个维度都有至少 3 条不同来源的 URL\n"
-                "  2. 用户声音维度（user_voice）已有来自真实用户讨论的来源（知乎/Reddit/论坛）\n"
-                "  3. 定价维度已有每个产品的官方定价页\n"
-                "  4. 总来源数超过 40 条\n"
-                "只要有任何一个产品×维度组合的来源数为 0，就不能停止。\n"
+                "  1. 每个推理模式维度都有至少 3 条不同论文的候选内容\n"
+                "  2. 核心方向（如知识图谱、NLP）有代表性论文和最新进展\n"
+                "  3. 总来源数超过 30 条\n"
+                "只要有任何一个推理模式维度的来源数为 0，就不能停止。\n"
                 "\n"
                 "【下一批查询的设计原则】\n"
-                "  A. 优先补充完全没有来源的产品×维度组合\n"
-                "  B. 其次补充只有官方来源、缺少用户声音的维度\n"
-                "  C. 避免重复搜索已覆盖充分的内容\n"
-                "  D. 用户口碑类查询（use_zhihu=true）写中文口语，如：\n"
-                "     '从 GitHub Copilot 换到 Cursor 之后感受如何？'\n"
-                "     'Windsurf IDE 和 Cursor 对比，哪个更值得付费？'\n"
-                "  E. 技术对比类查询举例：'Cursor vs GitHub Copilot context window benchmark'\n"
-                "  F. 定价类查询举例：'Cursor Pro pricing 2024 annual plan'\n"
+                "  A. 优先补充完全没有来源的推理模式维度\n"
+                "  B. 其次补充只有经典论文、缺少最新进展的维度\n"
+                "  C. 避免重复检索已覆盖充分的内容\n"
+                "  D. 技术对比类查询举例：'RAG vs long-context LLM performance comparison'\n"
+                "  E. 方法创新类查询举例：'knowledge graph reasoning with large language models'\n"
                 "\n"
                 "【输出格式】JSON：\n"
                 "{\n"
-                '  "reasoning": "逐产品×维度分析：已有X条，还缺Y，原因Z",\n'
+                '  "reasoning": "逐推理模式分析：已有X条，还缺Y，原因Z",\n'
                 '  "should_stop": false,\n'
                 '  "stop_reason": "（should_stop=true 时填写）",\n'
                 '  "next_tasks": [\n'
                 '    {\n'
-                '      "entity": "产品名",\n'
-                '      "dimension": "维度英文key",\n'
-                '      "intent": "review",\n'
-                '      "query": "具体搜索查询（中文或英文）",\n'
-                '      "use_zhihu": false,\n'
+                '      "entity": "研究方向",\n'
+                '      "dimension": "推理模式英文key",\n'
+                '      "intent": "official",\n'
+                '      "query": "具体英文检索查询",\n'
                 '      "rationale": "这条查询能补充什么具体信息"\n'
                 '    }\n'
                 "  ]\n"
                 "}\n"
                 "\n"
-                "next_tasks 每次最多 8 条，intent 只能是：\n"
-                "official / pricing / docs / changelog / review / enterprise / news / comparison"
+                "next_tasks 每次最多 8 条，intent 只能是：official / docs / review / comparison"
             ),
             user=(
                 f"目标产品：{request.target_product}"
@@ -939,43 +929,52 @@ class EvidenceStructuringAgent(BaseAgent):
 
         if is_user_voice:
             system_prompt = (
-                "你是 Evidence Structuring Agent，专门处理用户真实评价内容。\n"
+                "你是论文创新证据提取智能体（EvidenceStructuringAgent），专门从学术论文中提取结构化创新证据。\n"
                 "\n"
-                "【当前来源类型】用户声音（知乎/社区/评测）\n"
+                "【当前来源类型】学术论文\n"
                 "\n"
                 "【提取规则】\n"
-                "1. 重点提取用户对产品的主观感受、对比意见、痛点、好评点\n"
-                "2. 保留用户语气中的程度词：'明显快很多'、'基本没用'、'比 X 差多了'\n"
-                "3. competitor 字段：填写被评价/被对比的产品名；若是横向对比，填主要被比较的竞品\n"
-                "4. fact 字段：用'用户反馈'开头，如'用户反馈 Cursor 的代码补全速度明显优于 GitHub Copilot'\n"
-                "5. quote 必须是原文中的真实片段，保留原文措辞\n"
-                "6. confidence 按权威度打分：知名用户/有认证/高赞回答 → 0.70-0.82，普通用户 → 0.50-0.65\n"
-                "7. dimension 优先分配到 user_voice，若内容明确涉及定价/功能/企业能力则分配对应维度\n"
+                "1. 重点提取论文的创新点、方法论、实验结果、与现有方法的对比\n"
+                "2. 每条证据必须包含：reasoning_pattern（推理模式）、bottleneck（瓶颈）、mechanism（机制）\n"
+                "3. reasoning_pattern 必须是 15 种之一：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
+                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
+                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
+                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
+                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
+                "4. bottleneck：该论文要解决的具体技术瓶颈是什么\n"
+                "5. mechanism：论文提出的具体解决机制是什么\n"
+                "6. fact 字段：用中文写一句完整的创新事实，包含：论文名 + 具体创新内容\n"
+                "7. quote 必须是论文原文中的连续片段，保留原文措辞\n"
+                "8. confidence 按证据强度打分：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                "输出 JSON：{\"evidence\":[{\"competitor\", \"dimension\", \"fact\", \"quote\", \"confidence\"}]}\n"
-                "每篇文档最多提取 8 条，只保留有实质信息的，不要提取空洞废话。"
+                '输出 JSON：{"evidence":[{"competitor", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                "每篇论文最多提取 8 条，只保留有实质创新信息的。"
             )
         else:
             system_prompt = (
-                "你是 Evidence Structuring Agent，专门从官方/媒体内容中提取结构化证据。\n"
+                "你是论文创新证据提取智能体（EvidenceStructuringAgent），专门从学术论文中提取结构化创新证据。\n"
                 "\n"
-                "【当前来源类型】官方页面 / 媒体报道 / 技术文档\n"
+                "【当前来源类型】学术论文\n"
                 "\n"
                 "【提取规则】\n"
-                "1. 只提取可验证的事实性陈述，禁止提取推测、广告语或无法核实的声明\n"
-                "2. fact 字段：用中文写一句完整的竞品事实，包含：主语（哪个产品）+ 具体内容\n"
-                "   好的示例：'GitHub Copilot Enterprise 版本支持企业级 SAML SSO 和审计日志'\n"
-                "   差的示例：'该产品功能强大，受到广泛好评'（太模糊）\n"
-                "3. quote 必须是原文中的连续片段，字数 20-300，不能改写\n"
-                "4. competitor 字段：填写证据描述的产品名（可以是目标产品或竞品）\n"
-                "5. confidence 按来源权威度：官方定价/文档页 → 0.88-0.95，\n"
-                "   新闻/博客 → 0.70-0.82，第三方评测 → 0.65-0.78\n"
-                "6. 同一事实只提取一次，不要重复\n"
+                "1. 只提取可验证的创新事实，禁止提取推测、空洞评价或无法核实的声明\n"
+                "2. 每条证据必须包含：reasoning_pattern（推理模式）、bottleneck（瓶颈）、mechanism（机制）\n"
+                "3. reasoning_pattern 必须是 15 种之一：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
+                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
+                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
+                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
+                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
+                "4. bottleneck：该论文要解决的具体技术瓶颈是什么\n"
+                "5. mechanism：论文提出的具体解决机制是什么\n"
+                "6. fact 字段：用中文写一句完整的创新事实，包含：论文名 + 具体创新内容\n"
+                "7. quote 必须是论文原文中的连续片段，字数 20-300，不能改写\n"
+                "8. confidence 按证据强度：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
+                "9. 同一创新点只提取一次，不要重复\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                "输出 JSON：{\"evidence\":[{\"competitor\", \"dimension\", \"fact\", \"quote\", \"confidence\"}]}\n"
-                "每篇文档最多提取 10 条最重要的证据。"
+                '输出 JSON：{"evidence":[{"competitor", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                "每篇论文最多提取 10 条最重要的创新证据。"
             )
 
         data = await self.invoke_json(
@@ -1070,26 +1069,26 @@ class AnalysisAndReviewAgent(BaseAgent):
 
         data = await self.invoke_json(
             system=(
-                "你是竞品分析智能体（AnalysisAndReviewAgent）的结论生成技能。\n"
+                "你是推理模式分析智能体（AnalysisAndReviewAgent）的结论生成技能。\n"
                 "\n"
                 "【核心原则】\n"
-                "你的工作是从 Evidence 中提炼真正有价值的竞品洞察，而不是简单复述证据。\n"
-                "好的 Claim 要回答：'在这个维度上，这些产品之间的关键差异是什么？这对用户意味着什么？'\n"
+                "你的工作是从论文 Evidence 中提炼真正有价值的推理模式洞察，而不是简单复述证据。\n"
+                "好的 Claim 要回答：'在这个推理模式上，这些论文之间的关键创新差异是什么？这对该领域意味着什么？'\n"
                 "\n"
                 "【结论生成要求】\n"
-                "1. 优先生成【横向对比型】结论：\n"
-                "   '在企业化能力上，GitHub Copilot 提供了 SAML SSO 和审计日志，而 Cursor 和 Windsurf 尚未公开类似企业级功能'\n"
-                "2. 其次生成【单产品洞察型】结论：\n"
-                "   'Cursor 的 Context Window 策略是其核心差异化，支持全仓库代码索引'\n"
+                "1. 优先生成【推理模式对比型】结论：\n"
+                "   '在跨领域综合模式上，论文A将知识图谱引入LLM推理，而论文B则从多模态角度进行综合'\n"
+                "2. 其次生成【单论文洞察型】结论：\n"
+                "   '论文C的表征转换创新在于将图结构转化为序列表示，突破了传统GNN的表达瓶颈'\n"
                 "3. 避免生成【无实质内容的废话型】结论：\n"
-                "   '各产品均在积极发展中'（×）'功能较为丰富'（×）\n"
+                "   '各论文均在积极探索'（×）'方法较为新颖'（×）\n"
                 "4. 每条 Claim 必须绑定至少 1 条 supporting_evidence_id，且 evidence_id 必须真实存在\n"
-                "5. 如果用户声音证据（source_type=user_review）与官方说法有出入，生成专门的对比 Claim\n"
+                "5. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
                 "6. confidence 反映证据充分程度：多源交叉验证 → 0.80+，单源 → 0.55-0.70\n"
                 "\n"
                 "【输出格式】JSON：\n"
                 '{"claims":[{\n'
-                '  "dimension": "维度英文key",\n'
+                '  "dimension": "推理模式英文key",\n'
                 '  "claim": "完整的分析结论（中文，50-200字）",\n'
                 '  "supporting_evidence_ids": ["ev_xxx", "ev_yyy"],\n'
                 '  "confidence": 0.75,\n'
@@ -1182,8 +1181,8 @@ class AnalysisAndReviewAgent(BaseAgent):
 
         data = await self.invoke_json(
             system=(
-                "你是竞品分析审查智能体（AnalysisAndReviewAgent）的红队技能，\n"
-                "专门从反方视角审查竞品分析结论的可信度和风险。\n"
+                "你是推理模式审查智能体（AnalysisAndReviewAgent）的红队技能，\n"
+                "专门从反方视角审查论文推理模式分析结论的可信度和风险。\n"
                 "\n"
                 "【审查维度】（每条 Claim 逐一检查）\n"
                 "1. 【来源单一风险】：所有证据来自同一域名/产品官方 → severity=high\n"
@@ -1545,7 +1544,7 @@ class ReportComposerAgent(BaseAgent):
 
         markdown = await self.invoke_text_strict(
             system=(
-                "你是一名专业的产品竞争情报分析师，正在撰写一份供产品团队、市场团队和高管阅读的竞品分析报告。\n"
+                "你是一名专业的学术研究分析师，正在撰写一份供研究者阅读的论文推理模式分析报告。\n"
                 "你只能基于用户提供的 briefing notes 写作，不得编造 briefing notes 之外的事实、数据或来源。\n"
                 "\n"
                 "【硬性禁止】报告正文中不得出现以下任何内容：\n"

@@ -40,26 +40,42 @@ class LLMClient:
     async def complete(self, system: str, user: str, *, temperature: float | None = None) -> str:
         if not self._client:
             raise RuntimeError("LLM is not configured")
-        last_error: Exception | None = None
-        for attempt in range(self.settings.cg_llm_max_retries + 1):
+        attempt = 0
+        while True:
             await self._wait_for_slot()
             try:
                 response = await self._client.chat.completions.create(
                     model=self.model,
                     temperature=self.settings.cg_llm_temperature if temperature is None else temperature,
+                    max_tokens=8192,
                     messages=[
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
                     ],
                 )
-                return response.choices[0].message.content or ""
-            except (APIConnectionError, APITimeoutError, RateLimitError) as exc:
+                msg = response.choices[0].message
+                content = msg.content or ""
+                # MiMo thinking model: reasoning_content 可能有内容而 content 为空
+                if not content and hasattr(msg, "reasoning_content") and msg.reasoning_content:
+                    reasoning = msg.reasoning_content
+                    # 尝试从 reasoning_content 中提取 JSON
+                    json_match = re.search(r"\{.*\}", reasoning, flags=re.S)
+                    if json_match:
+                        content = json_match.group(0)
+                    else:
+                        content = reasoning
+                return content
+            except RateLimitError:
+                # 429: sleep 10s, 无限重试
+                await asyncio.sleep(10)
+                attempt += 1
+            except (APIConnectionError, APITimeoutError) as exc:
                 last_error = exc
                 if attempt >= self.settings.cg_llm_max_retries:
                     raise
                 cooldown = self.settings.cg_llm_rate_limit_cooldown_seconds * (attempt + 1)
                 await asyncio.sleep(cooldown)
-        raise last_error or RuntimeError("LLM request failed")
+                attempt += 1
 
     async def _wait_for_slot(self) -> None:
         global _LAST_LLM_REQUEST_AT
