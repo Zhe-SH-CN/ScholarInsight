@@ -105,11 +105,16 @@ class LocalPaperSearchTool:
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        index_path = getattr(settings, "scholar_paper_index_path", "data/paper_index.json")
-        # 如果是相对路径，相对于 data_dir
+        index_path = getattr(settings, "scholar_paper_index_path", "paper_index.json")
         p = Path(index_path)
         if not p.is_absolute():
-            p = (settings.data_dir / index_path).resolve()
+            # 先尝试直接相对于 data_dir
+            candidate = (settings.data_dir / p.name).resolve()
+            if candidate.exists():
+                p = candidate
+            else:
+                # fallback: data_dir 下的子路径
+                p = (settings.data_dir / index_path).resolve()
         self.index = LocalPaperIndex(str(p))
 
     @property

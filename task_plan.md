@@ -36,15 +36,11 @@ Phase 9 (收尾) — 等待 PDF 提取完成后构建 embedding
 - [ ] Git commit + push
 - **Status:** in_progress
 
-## Phase 2: Embedding 索引 — build_embeddings.py
-- [ ] 创建 `scripts/build_embeddings.py`
-  - 加载 `BAAI/bge-large-en-v1.5` 到 A6000
-  - encode 所有论文的 title + abstract
-  - 输出 `data/embeddings.npy`（N × 1024 float32）
-- [ ] 运行 embedding（~10 分钟，GPU）
-- [ ] 验证：加载 embedding，测试几个 query 的 cosine similarity
-- [ ] Git commit + push
-- **Status:** pending
+## Phase 2: Embedding 索引 — build_embeddings.py ✅
+- [x] 创建 `scripts/build_embeddings.py`
+- [x] 运行 embedding（CPU ~3 小时，27725 篇 × 1024 维）
+- [x] 输出 `data/embeddings.npy` (109MB)
+- **Status:** complete
 
 ## Phase 3: 代码改造 — Schemas & Settings & .env ✅
 - [x] `DEFAULT_DIMENSIONS` → 15 种 REASONING_PATTERNS
@@ -110,11 +106,12 @@ Phase 9 (收尾) — 等待 PDF 提取完成后构建 embedding
 - [x] Git commit + push
 - **Status:** complete
 
-## Phase 9: 收尾
-- [x] Git commit + push (Phase 3-8 已推送)
-- [ ] 等待 PDF 提取完成 → 构建 embedding
-- [ ] 更新 progress.md 最终状态
-- **Status:** in_progress
+## Phase 9: 收尾 ✅
+- [x] Git commit + push
+- [x] PDF 提取完成 (27,725/36,539)
+- [x] Embedding 构建完成 (27,725 × 1024)
+- [x] 更新 progress.md
+- **Status:** complete
 
 ---
 
