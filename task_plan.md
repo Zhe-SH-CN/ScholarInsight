@@ -9,7 +9,7 @@
 - `decisions.md` — grilling 确认的 28 条决策
 
 ## Current Phase
-Phase 9 (收尾) — 等待 PDF 提取完成后构建 embedding
+全部 Phase 完成 — Batch Daemon 24/7 运行中
 
 ---
 
