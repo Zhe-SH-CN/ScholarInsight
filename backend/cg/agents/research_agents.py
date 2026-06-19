@@ -1168,96 +1168,102 @@ class AnalysisAndReviewAgent(BaseAgent):
             return reviewed
 
         by_id = {ev.evidence_id: ev for ev in evidence}
-        payload = []
-        for claim in reviewed[:60]:
-            supporting_evs = [by_id[eid] for eid in claim.supporting_evidence_ids if eid in by_id]
-            source_types = list({ev.source_type for ev in supporting_evs})
-            source_count = len({ev.source_url for ev in supporting_evs})
-            payload.append({
-                "claim_id": claim.claim_id,
-                "claim": claim.claim,
-                "dimension": claim.dimension,
-                "supporting_evidence_ids": claim.supporting_evidence_ids,
-                "confidence": claim.confidence,
-                "evidence_source_types": source_types,
-                "unique_source_count": source_count,
-                "current_notes": [note.model_dump(mode="json") for note in claim.red_team_notes],
-            })
-
-        data = await self.invoke_json(
-            system=(
-                "你是推理模式审查智能体（AnalysisAndReviewAgent）的红队技能，\n"
-                "专门从反方视角审查论文推理模式分析结论的可信度和风险。\n"
-                "\n"
-                "【审查维度】（每条 Claim 逐一检查）\n"
-                "1. 【来源单一风险】：所有证据来自同一域名/产品官方 → severity=high\n"
-                "2. 【证据不足风险】：仅 1 条证据支撑强结论 → severity=medium/high\n"
-                "3. 【过度推断风险】：结论超出证据直接支持的范围 → severity=medium\n"
-                "4. 【时效风险】：证据可能过时（产品更新快，6个月前的数据需标注）→ severity=low\n"
-                "5. 【措辞风险】：使用了'最好'、'唯一'、'绝对'等绝对化表述而证据不支撑 → severity=medium\n"
-                "6. 【实验验证缺失】：理论分析充分但缺乏实验结果佐证 → severity=low\n"
-                "\n"
-                "【验证状态标准】\n"
-                "- verified：多源交叉验证，结论措辞保守，无明显风险\n"
-                "- needs_evidence：证据不足，结论需要更多来源支撑\n"
-                "- challenged：有明显风险，结论需要大幅修改措辞\n"
-                "- rejected：结论无法被证据支撑，或存在明显事实错误\n"
-                "\n"
-                "【final_wording 要求】\n"
-                "对 challenged/needs_evidence 的结论，必须给出修改后的保守表述：\n"
-                "  - 加限定语：'根据现有论文...'、'据目前可见的证据...'、'部分实验结果显示...'\n"
-                "  - 降低确定性：把'是'改成'似乎是'，把'最好'改成'表现较好'\n"
-                "\n"
-                "【输出格式】JSON：\n"
-                '{"reviews":[{\n'
-                '  "claim_id": "...",\n'
-                '  "verification_status": "verified|needs_evidence|challenged|rejected",\n'
-                '  "final_wording": "（修改后的措辞，verified 时可留空）",\n'
-                '  "notes": [{"risk_type": "...", "comment": "...", "suggested_action": "...", "severity": "low|medium|high"}]\n'
-                "}]}"
-            ),
-            user=f"待审查 Claims（含证据元信息）：\n{payload}",
+        system_prompt = (
+            "你是推理模式审查智能体（AnalysisAndReviewAgent）的红队技能，\n"
+            "专门从反方视角审查论文推理模式分析结论的可信度和风险。\n"
+            "\n"
+            "【审查维度】（每条 Claim 逐一检查）\n"
+            "1. 【来源单一风险】：所有证据来自同一域名/产品官方 → severity=high\n"
+            "2. 【证据不足风险】：仅 1 条证据支撑强结论 → severity=medium/high\n"
+            "3. 【过度推断风险】：结论超出证据直接支持的范围 → severity=medium\n"
+            "4. 【时效风险】：证据可能过时（产品更新快，6个月前的数据需标注）→ severity=low\n"
+            "5. 【措辞风险】：使用了'最好'、'唯一'、'绝对'等绝对化表述而证据不支撑 → severity=medium\n"
+            "6. 【实验验证缺失】：理论分析充分但缺乏实验结果佐证 → severity=low\n"
+            "\n"
+            "【验证状态标准】\n"
+            "- verified：多源交叉验证，结论措辞保守，无明显风险\n"
+            "- needs_evidence：证据不足，结论需要更多来源支撑\n"
+            "- challenged：有明显风险，结论需要大幅修改措辞\n"
+            "- rejected：结论无法被证据支撑，或存在明显事实错误\n"
+            "\n"
+            "【final_wording 要求】\n"
+            "对 challenged/needs_evidence 的结论，必须给出修改后的保守表述：\n"
+            "  - 加限定语：'根据现有论文...'、'据目前可见的证据...'、'部分实验结果显示...'\n"
+            "  - 降低确定性：把'是'改成'似乎是'，把'最好'改成'表现较好'\n"
+            "\n"
+            "【输出格式】JSON：\n"
+            '{"reviews":[{\n'
+            '  "claim_id": "...",\n'
+            '  "verification_status": "verified|needs_evidence|challenged|rejected",\n'
+            '  "final_wording": "（修改后的措辞，verified 时可留空）",\n'
+            '  "notes": [{"risk_type": "...", "comment": "...", "suggested_action": "...", "severity": "low|medium|high"}]\n'
+            "}]}"
         )
-        rows = data.get("reviews") if data else None
-        if not isinstance(rows, list):
-            return reviewed
-        by_id = {claim.claim_id: claim for claim in reviewed}
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            claim = by_id.get(str(row.get("claim_id") or ""))
-            if not claim:
-                continue
-            notes: list[RedTeamNote] = []
-            for note in row.get("notes") or []:
-                if isinstance(note, dict):
-                    notes.append(
-                        RedTeamNote(
-                            risk_type=str(note.get("risk_type") or "llm_review"),
-                            comment=str(note.get("comment") or ""),
-                            suggested_action=str(note.get("suggested_action") or ""),
-                            severity=str(note.get("severity") or "medium"),  # type: ignore[arg-type]
-                        )
-                    )
-            if notes:
-                claim.red_team_notes = notes
-            final_wording = str(row.get("final_wording") or "").strip()
-            if final_wording:
-                claim.final_wording = final_wording
-            status = str(row.get("verification_status") or claim.verification_status)
-            # 保留确定性审查的通过基线：LLM 只有给出明确风险 notes 时才降级，避免全量保守判失败。
-            if claim.verification_status == "verified" and status != "verified" and not notes:
-                status = "verified"
-            if status in {"verified", "needs_evidence", "challenged", "rejected", "draft", "included_in_report"}:
-                claim.verification_status = status  # type: ignore[assignment]
-            if claim.verification_status == "verified":
-                claim.red_team_notes = []
-                claim.risk_level = "low"
-                claim.final_wording = claim.final_wording or claim.claim
-                continue
-            claim.risk_level = "high" if any(note.severity == "high" for note in claim.red_team_notes) else (
-                "medium" if claim.red_team_notes else "low"
+
+        # 分批处理，每批 15 个 claims，避免 payload 过大导致 TTFT 过长
+        BATCH_SIZE = 15
+        for batch_start in range(0, len(reviewed), BATCH_SIZE):
+            batch = reviewed[batch_start:batch_start + BATCH_SIZE]
+            payload = []
+            for claim in batch:
+                supporting_evs = [by_id[eid] for eid in claim.supporting_evidence_ids if eid in by_id]
+                source_types = list({ev.source_type for ev in supporting_evs})
+                source_count = len({ev.source_url for ev in supporting_evs})
+                payload.append({
+                    "claim_id": claim.claim_id,
+                    "claim": claim.claim,
+                    "dimension": claim.dimension,
+                    "supporting_evidence_ids": claim.supporting_evidence_ids[:5],  # 限制数量
+                    "confidence": claim.confidence,
+                    "evidence_source_types": source_types,
+                    "unique_source_count": source_count,
+                    "current_notes": [note.model_dump(mode="json") for note in claim.red_team_notes[:2]],
+                })
+
+            data = await self.invoke_json(
+                system=system_prompt,
+                user=f"待审查 Claims（含证据元信息）：\n{payload}",
             )
+            rows = data.get("reviews") if data else None
+            if not isinstance(rows, list):
+                continue
+            by_claim_id = {claim.claim_id: claim for claim in batch}
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                claim = by_claim_id.get(str(row.get("claim_id") or ""))
+                if not claim:
+                    continue
+                notes: list[RedTeamNote] = []
+                for note in row.get("notes") or []:
+                    if isinstance(note, dict):
+                        notes.append(
+                            RedTeamNote(
+                                risk_type=str(note.get("risk_type") or "llm_review"),
+                                comment=str(note.get("comment") or ""),
+                                suggested_action=str(note.get("suggested_action") or ""),
+                                severity=str(note.get("severity") or "medium"),  # type: ignore[arg-type]
+                            )
+                        )
+                if notes:
+                    claim.red_team_notes = notes
+                final_wording = str(row.get("final_wording") or "").strip()
+                if final_wording:
+                    claim.final_wording = final_wording
+                status = str(row.get("verification_status") or claim.verification_status)
+                if claim.verification_status == "verified" and status != "verified" and not notes:
+                    status = "verified"
+                if status in {"verified", "needs_evidence", "challenged", "rejected", "draft", "included_in_report"}:
+                    claim.verification_status = status  # type: ignore[assignment]
+                if claim.verification_status == "verified":
+                    claim.red_team_notes = []
+                    claim.risk_level = "low"
+                    claim.final_wording = claim.final_wording or claim.claim
+                    continue
+                claim.risk_level = "high" if any(note.severity == "high" for note in claim.red_team_notes) else (
+                    "medium" if claim.red_team_notes else "low"
+                )
+
         await self.record_llm_event(
             "progress",
             "claims_reviewed",
