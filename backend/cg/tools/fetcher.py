@@ -38,6 +38,40 @@ class Fetcher:
         timeout = httpx.Timeout(self.settings.cg_http_timeout_seconds)
         proxy = self.settings.http_proxy or None
         fetched_at = datetime.now(timezone.utc)
+
+        # 跳过 macOS 隐藏文件和本地文件路径
+        if url.startswith("/") or url.startswith("./"):
+            return RawPage(
+                url=url,
+                final_url=url,
+                title=url.split("/")[-1],
+                content="",
+                html="",
+                content_hash="",
+                fetched_at=fetched_at,
+                http_status=None,
+                parser="local_file_skip",
+                ok=False,
+                error="Local file path, skipped HTTP fetch",
+            )
+
+        # 跳过 macOS ._ 开头的隐藏文件
+        basename = url.split("/")[-1]
+        if basename.startswith("._"):
+            return RawPage(
+                url=url,
+                final_url=url,
+                title=basename,
+                content="",
+                html="",
+                content_hash="",
+                fetched_at=fetched_at,
+                http_status=None,
+                parser="macos_metadata_skip",
+                ok=False,
+                error="macOS metadata file (._*), skipped",
+            )
+
         try:
             async with httpx.AsyncClient(
                 follow_redirects=True,
