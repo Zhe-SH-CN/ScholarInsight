@@ -1,4 +1,4 @@
-"""Agent runtime primitives for CompeteGraph."""
+"""Agent runtime primitives for ScholarInsight."""
 
 from __future__ import annotations
 

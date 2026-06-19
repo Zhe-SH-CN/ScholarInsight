@@ -28,10 +28,9 @@ from cg.repositories.base import append_jsonl, atomic_write_json, write_text
 from cg.repositories.evidence import EvidenceRepository
 from cg.repositories.run import RunRepository
 from cg.schemas.research import (
-    BattlecardItem,
     Claim,
-    CompetitorMatrix,
-    CompetitorProfile,
+    PaperPatternMatrix,
+    PaperProfile,
     DEFAULT_DIMENSIONS,
     DIMENSION_LABELS,
     Evidence,
@@ -182,8 +181,8 @@ class ResearchPipeline:
             status.status = "failed"
             status.current_stage = "Failed"
             status.error = (
-                "⚠️ LLM API Key 未配置。CompeteGraph 需要 LLM 才能运行智能体搜索与分析。"
-                "请在 backend/.env 中填写 ARK_API_KEY / DEEPSEEK_API_KEY / QWEN_API_KEY，"
+                "⚠️ LLM API Key 未配置。ScholarInsight 需要 LLM 才能运行智能体搜索与分析。"
+                "请在 backend/.env 中填写 MIMO_API_KEY，"
                 "然后重启后端服务并重新发起研究。"
             )
             await self.runs.save_status(status)
@@ -327,8 +326,8 @@ class ResearchPipeline:
 
                     # 构建矩阵用于覆盖度计算
                     dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-                    competitors = [request.target_product, *request.competitors]
-                    interim_matrix = build_competitor_matrix(all_evidence, list(dict.fromkeys(competitors)), dimensions)
+                    papers = [request.target_topic]
+                    interim_matrix = build_paper_pattern_matrix(all_evidence, papers, dimensions)
                     coverage_score = sum(interim_matrix.coverage_by_dimension.values()) / max(
                         1, len(interim_matrix.coverage_by_dimension)
                     )
@@ -408,9 +407,8 @@ class ResearchPipeline:
                     reviewed_claims,
                     metrics,
                     status.started_at,
-                    matrix_builder=build_competitor_matrix,
+                    matrix_builder=build_paper_pattern_matrix,
                     recommendations_builder=build_recommendations,
-                    battlecards_builder=build_battlecards,
                     graph_builder=build_evidence_graph,
                     observability_builder=build_observability,
                     average_fn=average,
@@ -419,7 +417,6 @@ class ResearchPipeline:
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
-                metrics.battlecard_count = len(artifacts["battlecards"])
                 metrics.average_evidence_confidence = artifacts["average_evidence_confidence"]
                 metrics.coverage_score = artifacts["observability"].evidence_coverage_score
                 status.metrics = metrics
@@ -431,7 +428,7 @@ class ResearchPipeline:
                 await self.write_report(
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"],
-                    artifacts["battlecards"], artifacts["observability"],
+                    artifacts["observability"],
                 )
 
             status.status = "completed"
@@ -465,8 +462,8 @@ class ResearchPipeline:
             status = await self.runs.create(
                 ResearchRequest(
                     project_name="Quick Extract",
-                    target_product=urlparse(str(request.url)).netloc,
-                    competitors=[],
+                    target_topic=urlparse(str(request.url)).netloc,
+                    seed_papers=[],
                     seed_urls=[str(request.url)],
                     auto_discover_sources=False,
                     max_sources=1,
@@ -491,8 +488,8 @@ class ResearchPipeline:
             run_id,
             ResearchRequest(
                 project_name=status.project_name,
-                target_product=status.target_product,
-                competitors=[],
+                target_topic=status.target_topic,
+                seed_papers=[],
                 analysis_dimensions=DEFAULT_DIMENSIONS.copy(),
                 seed_urls=[str(request.url)],
                 auto_discover_sources=False,
@@ -646,7 +643,7 @@ class ResearchPipeline:
         if maybe_documents is None:
             plan = ResearchPlan(
                 research_goal=request.research_goal,
-                competitors=request.competitors,
+                papers=request.seed_papers,
                 dimensions=request.analysis_dimensions or DEFAULT_DIMENSIONS,
             )
             documents = plan_or_documents
@@ -656,7 +653,7 @@ class ResearchPipeline:
         repo = EvidenceRepository(self.runs.run_dir(run_id))
         evidence_items: list[Evidence] = []
         dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_product, *request.competitors]
+        entities = [request.target_topic]
         agent = EvidenceStructuringAgent(self.agent_context(run_id))
         coverage_counts = evidence_coverage_counts(existing_evidence or [], entities, dimensions)
         skipped_documents = 0
@@ -747,8 +744,8 @@ class ResearchPipeline:
                 completed_documents += 1
                 saved_for_document = 0
                 for item in extracted:
-                    if item.competitor and item.dimension:
-                        key = (item.competitor, item.dimension)
+                    if item.paper and item.dimension:
+                        key = (item.paper, item.dimension)
                         if evidence_cell_sufficient(coverage_counts.get(key, 0)):
                             continue
                         coverage_counts[key] = coverage_counts.get(key, 0) + 1
@@ -801,8 +798,8 @@ class ResearchPipeline:
         )
         for document, extracted in extracted_batches:
             for item in extracted:
-                if item.competitor and item.dimension:
-                    key = (item.competitor, item.dimension)
+                if item.paper and item.dimension:
+                    key = (item.paper, item.dimension)
                     if evidence_cell_sufficient(coverage_counts.get(key, 0)):
                         continue
                     coverage_counts[key] = coverage_counts.get(key, 0) + 1
@@ -844,25 +841,25 @@ class ResearchPipeline:
                 continue
             items = sorted(items, key=lambda ev: ev.confidence, reverse=True)
             dimension_label = DIMENSION_LABELS.get(dimension, dimension)
-            by_competitor: dict[str, list[Evidence]] = defaultdict(list)
+            by_paper: dict[str, list[Evidence]] = defaultdict(list)
             for item in items:
-                by_competitor[item.competitor or "相关产品"].append(item)
+                by_paper[item.paper or "相关论文"].append(item)
 
-            top_competitors = sorted(by_competitor, key=lambda name: len(by_competitor[name]), reverse=True)[:5]
-            if len(top_competitors) >= 2:
-                supporting = [ev for name in top_competitors for ev in by_competitor[name][:2]][:8]
-                facts = "；".join(f"{name}：{by_competitor[name][0].fact}" for name in top_competitors[:4] if by_competitor[name])
+            top_papers = sorted(by_paper, key=lambda name: len(by_paper[name]), reverse=True)[:5]
+            if len(top_papers) >= 2:
+                supporting = [ev for name in top_papers for ev in by_paper[name][:2]][:8]
+                facts = "；".join(f"{name}：{by_paper[name][0].fact}" for name in top_papers[:4] if by_paper[name])
                 deterministic_claims.append(build_claim_from_support(
                     run_id,
                     dimension,
                     dimension_label,
-                    f"在{dimension_label}维度，公开证据显示不同产品的重点明显不同：{facts}",
+                    f"在{dimension_label}维度，公开证据显示不同论文的重点明显不同：{facts}",
                     supporting,
-                    f"该横向结论聚合 {len(items)} 条 Evidence，覆盖 {len(top_competitors)} 个产品。",
+                    f"该横向结论聚合 {len(items)} 条 Evidence，覆盖 {len(top_papers)} 篇论文。",
                 ))
 
-            for competitor, competitor_items in list(by_competitor.items())[:6]:
-                supporting = competitor_items[:5]
+            for paper, paper_items in list(by_paper.items())[:6]:
+                supporting = paper_items[:5]
                 if not supporting:
                     continue
                 fact_snippet = "；".join(ev.fact for ev in supporting[:2])
@@ -870,9 +867,9 @@ class ResearchPipeline:
                     run_id,
                     dimension,
                     dimension_label,
-                    f"{competitor} 在{dimension_label}维度的公开信息集中体现为：{fact_snippet}",
+                    f"{paper} 在{dimension_label}维度的创新证据集中体现为：{fact_snippet}",
                     supporting,
-                    f"该单产品结论由 {len(competitor_items)} 条 Evidence 支持。",
+                    f"该论文结论由 {len(paper_items)} 条 Evidence 支持。",
                 ))
         claims = await AnalysisAndReviewAgent(self.agent_context(run_id)).generate(evidence, deterministic_claims, request)
         return claims
@@ -901,15 +898,12 @@ class ResearchPipeline:
         run_dir = self.runs.run_dir(run_id)
         matrix = artifacts["matrix"]
         recommendations = artifacts["recommendations"]
-        battlecards = artifacts["battlecards"]
         evidence_graph = artifacts["evidence_graph"]
         observability = artifacts["observability"]
         await atomic_write_json(run_dir / "exports" / "matrix.json", matrix)
         await write_text(run_dir / "exports" / "matrix.csv", build_matrix_csv(matrix))
         await atomic_write_json(run_dir / "exports" / "recommendations.json", recommendations)
         await write_text(run_dir / "exports" / "recommendations.md", build_recommendations_markdown(recommendations))
-        await atomic_write_json(run_dir / "exports" / "battlecards.json", battlecards)
-        await write_text(run_dir / "exports" / "battlecards.md", build_battlecards_markdown(battlecards))
         await atomic_write_json(run_dir / "exports" / "observability.json", observability)
         await atomic_write_json(run_dir / "exports" / "evidence_graph.json", evidence_graph)
 
@@ -920,9 +914,8 @@ class ResearchPipeline:
         evidence: list[Evidence],
         claims: list[Claim],
         metrics: RunMetrics,
-        matrix: CompetitorMatrix,
+        matrix: PaperPatternMatrix,
         recommendations: list[OpportunityRecommendation],
-        battlecards: list[BattlecardItem],
         observability: ObservabilitySnapshot,
     ) -> None:
         composer = ReportComposerAgent(self.agent_context(run_id))
@@ -934,7 +927,6 @@ class ResearchPipeline:
             {
                 "matrix": matrix,
                 "recommendations": recommendations,
-                "battlecards": battlecards,
                 "observability": observability,
             },
         )
@@ -968,7 +960,6 @@ class ResearchPipeline:
                 "claims": claims,
                 "matrix": matrix,
                 "recommendations": recommendations,
-                "battlecards": battlecards,
                 "observability": observability,
                 "evidence_ids": [ev.evidence_id for ev in evidence],
             },
@@ -1043,30 +1034,30 @@ def build_dag_snapshot(plan: ResearchPlan) -> dict:
     }
 
 
-def build_competitor_matrix(
-    evidence: list[Evidence], competitors: list[str], dimensions: list[str]
-) -> CompetitorMatrix:
+def build_paper_pattern_matrix(
+    evidence: list[Evidence], papers: list[str], dimensions: list[str]
+) -> PaperPatternMatrix:
     now = datetime.now(UTC)
     evidence_by_cell: dict[tuple[str, str], list[Evidence]] = defaultdict(list)
     for ev in evidence:
-        competitor = ev.competitor or detect_entity(ev.fact, ev.source_title, ev.source_url, competitors)
-        if not competitor and len(competitors) == 1:
-            competitor = competitors[0]
-        if competitor and ev.dimension in dimensions:
-            evidence_by_cell[(competitor, ev.dimension)].append(ev)
+        paper = ev.paper or detect_entity(ev.fact, ev.source_title, ev.source_url, papers)
+        if not paper and len(papers) == 1:
+            paper = papers[0]
+        if paper and ev.dimension in dimensions:
+            evidence_by_cell[(paper, ev.dimension)].append(ev)
 
     cells: list[MatrixCell] = []
-    for competitor in competitors:
+    for paper in papers:
         for dimension in dimensions:
-            items = sorted(evidence_by_cell.get((competitor, dimension), []), key=lambda ev: ev.confidence, reverse=True)
+            items = sorted(evidence_by_cell.get((paper, dimension), []), key=lambda ev: ev.confidence, reverse=True)
             confidence = average([ev.confidence for ev in items[:5]])
             status = cell_status(len(items), confidence)
             cells.append(
                 MatrixCell(
-                    competitor=competitor,
+                    paper=paper,
                     dimension=dimension,
                     dimension_label=DIMENSION_LABELS.get(dimension, dimension),
-                    summary=cell_summary(competitor, dimension, items),
+                    summary=cell_summary(paper, dimension, items),
                     evidence_count=len(items),
                     confidence=round(confidence, 3),
                     source_types=sorted({ev.source_type for ev in items}),
@@ -1075,41 +1066,41 @@ def build_competitor_matrix(
                 )
             )
 
-    profiles: list[CompetitorProfile] = []
-    for competitor in competitors:
-        competitor_items = [
+    profiles: list[PaperProfile] = []
+    for paper in papers:
+        paper_items = [
             ev
             for ev in evidence
-            if (ev.competitor or detect_entity(ev.fact, ev.source_title, ev.source_url, competitors)) == competitor
+            if (ev.paper or detect_entity(ev.fact, ev.source_title, ev.source_url, papers)) == paper
         ]
         strong_dimensions = [
             DIMENSION_LABELS.get(cell.dimension, cell.dimension)
             for cell in cells
-            if cell.competitor == competitor and cell.status in {"strong", "partial"}
+            if cell.paper == paper and cell.status in {"strong", "partial"}
         ]
         weak_dimensions = [
             DIMENSION_LABELS.get(cell.dimension, cell.dimension)
             for cell in cells
-            if cell.competitor == competitor and cell.status in {"weak", "unknown"}
+            if cell.paper == paper and cell.status in {"weak", "unknown"}
         ]
         profiles.append(
-            CompetitorProfile(
-                competitor=competitor,
-                summary=profile_summary(competitor, competitor_items, strong_dimensions, weak_dimensions),
-                evidence_count=len(competitor_items),
-                source_count=len({ev.source_url for ev in competitor_items}),
-                average_confidence=round(average([ev.confidence for ev in competitor_items]), 3),
+            PaperProfile(
+                paper=paper,
+                summary=profile_summary(paper, paper_items, strong_dimensions, weak_dimensions),
+                evidence_count=len(paper_items),
+                source_count=len({ev.source_url for ev in paper_items}),
+                average_confidence=round(average([ev.confidence for ev in paper_items]), 3),
                 strongest_dimensions=strong_dimensions[:4],
                 weak_or_unknown_dimensions=weak_dimensions[:4],
-                evidence_ids=[ev.evidence_id for ev in sorted(competitor_items, key=lambda item: item.confidence, reverse=True)[:10]],
+                evidence_ids=[ev.evidence_id for ev in sorted(paper_items, key=lambda item: item.confidence, reverse=True)[:10]],
             )
         )
 
-    coverage_by_competitor: dict[str, float] = {}
-    for competitor in competitors:
-        competitor_cells = [cell for cell in cells if cell.competitor == competitor]
-        coverage_by_competitor[competitor] = round(
-            sum(coverage_points(cell) for cell in competitor_cells) / max(1, len(competitor_cells)),
+    coverage_by_paper: dict[str, float] = {}
+    for paper in papers:
+        paper_cells = [cell for cell in cells if cell.paper == paper]
+        coverage_by_paper[paper] = round(
+            sum(coverage_points(cell) for cell in paper_cells) / max(1, len(paper_cells)),
             3,
         )
 
@@ -1121,14 +1112,14 @@ def build_competitor_matrix(
             3,
         )
 
-    return CompetitorMatrix(
+    return PaperPatternMatrix(
         generated_at=now,
-        competitors=competitors,
+        papers=papers,
         dimensions=dimensions,
         dimension_labels={dimension: DIMENSION_LABELS.get(dimension, dimension) for dimension in dimensions},
         cells=cells,
         profiles=profiles,
-        coverage_by_competitor=coverage_by_competitor,
+        coverage_by_paper=coverage_by_paper,
         coverage_by_dimension=coverage_by_dimension,
     )
 
@@ -1175,7 +1166,7 @@ def build_recommendations(
         key=lambda dimension: matrix.coverage_by_dimension.get(dimension, 0),
     )
     target_profile = next(
-        (profile for profile in matrix.profiles if profile.competitor == request.target_product),
+        (profile for profile in matrix.profiles if profile.paper == request.target_topic),
         None,
     )
     target_weak = target_profile.weak_or_unknown_dimensions if target_profile else []
@@ -1190,21 +1181,21 @@ def build_recommendations(
                 recommendation_id=stable_id("rec", f"{run_id}:strategy:{evidence_ids}"),
                 title="把机会点绑定到已验证证据链",
                 recommendation=(
-                    f"围绕 {request.target_product} 的公开叙事建立 2-3 个可验证机会主题，"
+                    f"围绕 {request.target_topic} 的研究方向建立 2-3 个可验证机会主题，"
                     "每个主题都绑定 Evidence、Claim 与 Red Team 审查结果。"
                 ),
                 priority="high",
                 target_audience="executive",
                 rationale=best_claim_text(strategic_claims[0]),
-                expected_value="让竞品分析从一次性报告变成可审计的产品决策输入。",
+                expected_value="让论文分析从一次性报告变成可审计的研究决策输入。",
                 based_on_claim_ids=[claim.claim_id for claim in strategic_claims[:3]],
                 evidence_ids=evidence_ids[:8],
                 next_steps=[
-                    "选择一条高置信度战略 Claim 进入产品路线图评审",
+                    "选择一条高置信度战略 Claim 进入研究方向评审",
                     "对 Red Team 标记的低证据结论安排二次采集",
                     "将关键 Evidence 纳入汇报附录，避免无来源判断",
                 ],
-                risks=["当前系统只使用公开资料，商业结果仍需结合内部数据校验。"],
+                risks=["当前系统只使用公开论文资料，研究结论仍需结合领域知识校验。"],
                 confidence=round(average([claim.confidence for claim in strategic_claims[:3]]), 3),
             )
         )
@@ -1222,7 +1213,7 @@ def build_recommendations(
                 title=f"优先补强{DIMENSION_LABELS.get(dimension, dimension)}证据覆盖",
                 recommendation=(
                     f"下一轮研究应优先补充 {DIMENSION_LABELS.get(dimension, dimension)} 相关来源，"
-                    "特别是第三方评测、官方文档、社区讨论和价格/企业能力页面。"
+                    "特别是代表性论文、最新进展和方法创新论文。"
                 ),
                 priority="medium" if evidence_ids else "high",
                 target_audience="pm",
@@ -1243,82 +1234,27 @@ def build_recommendations(
         recommendations.append(
             OpportunityRecommendation(
                 recommendation_id=stable_id("rec", f"{run_id}:target-position:{target_weak}"),
-                title=f"明确 {request.target_product} 的公开差异化叙事",
+                title=f"明确 {request.target_topic} 的研究空白",
                 recommendation=(
-                    f"当前资料中 {request.target_product} 在 {'、'.join(target_weak[:3])} 上的可核验证据偏少，"
-                    "建议把产品页、文档页和案例页补成能被外部研究者直接引用的证据。"
+                    f"当前资料中 {request.target_topic} 在 {'、'.join(target_weak[:3])} 上的可核验证据偏少，"
+                    "建议补充相关论文和最新进展。"
                 ),
                 priority="high",
                 target_audience="pm",
-                rationale="竞品分析不仅看产品是否具备能力，也看公开资料是否能形成清晰心智。",
-                expected_value="提升市场叙事一致性，让销售、产品和外部评测更容易复用同一套材料。",
+                rationale="论文分析不仅看研究方向是否有进展，也看公开论文是否能形成清晰认知。",
+                expected_value="提升研究叙事一致性，让后续分析更容易复用同一套材料。",
                 evidence_ids=target_profile.evidence_ids[:6] if target_profile else [],
                 next_steps=[
-                    "梳理目标产品的核心场景与证据素材",
-                    "补充面向客户问题的功能、企业化和定价说明",
-                    "将新增资料作为下一次 Run 的 seed URL",
+                    "梳理研究方向的核心论文与证据素材",
+                    "补充最新进展和方法创新论文",
+                    "将新增论文作为下一次 Run 的 seed papers",
                 ],
-                risks=["若产品能力本身尚未成熟，公开叙事需要保持谨慎，避免过度承诺。"],
+                risks=["若研究方向本身尚未成熟，分析结论需要保持谨慎，避免过度推断。"],
                 confidence=0.7,
             )
         )
 
     return recommendations[:5]
-
-
-def build_battlecards(
-    run_id: str,
-    request: ResearchRequest,
-    claims: list[Claim],
-    matrix: CompetitorMatrix,
-) -> list[BattlecardItem]:
-    cards: list[BattlecardItem] = []
-    claim_by_dimension: dict[str, list[Claim]] = defaultdict(list)
-    for claim in sorted(claims, key=lambda item: item.confidence, reverse=True):
-        claim_by_dimension[claim.dimension].append(claim)
-    target_cells = {
-        cell.dimension: cell
-        for cell in matrix.cells
-        if cell.competitor == request.target_product
-    }
-    for competitor in [name for name in matrix.competitors if name != request.target_product]:
-        competitor_cells = sorted(
-            [cell for cell in matrix.cells if cell.competitor == competitor and cell.evidence_count > 0],
-            key=lambda cell: (
-                cell.status == "strong",
-                cell.status == "partial",
-                cell.confidence,
-                cell.evidence_count,
-            ),
-            reverse=True,
-        )
-        if not competitor_cells:
-            continue
-        for cell in competitor_cells[:2]:
-            target_cell = target_cells.get(cell.dimension)
-            claims_for_dimension = claim_by_dimension.get(cell.dimension, [])
-            evidence_ids = unique_strings(
-                [
-                    *(target_cell.evidence_ids[:3] if target_cell else []),
-                    *cell.evidence_ids[:3],
-                    *[ev_id for claim in claims_for_dimension[:2] for ev_id in claim.supporting_evidence_ids],
-                ]
-            )[:6]
-            scenario = scenario_for_dimension(cell.dimension)
-            cards.append(
-                BattlecardItem(
-                    item_id=stable_id("card", f"{run_id}:{competitor}:{cell.dimension}:{evidence_ids}"),
-                    competitor=competitor,
-                    customer_scenario=scenario,
-                    competitor_strength=cell.summary,
-                    our_response=response_for_cell(request.target_product, target_cell, cell),
-                    talk_track=talk_track_for_cell(request.target_product, competitor, target_cell, cell),
-                    objection_handler=followup_for_cell(request.target_product, target_cell, cell),
-                    evidence_ids=evidence_ids,
-                    confidence=max(0.45, cell.confidence),
-                )
-            )
-    return cards[:8]
 
 
 def build_observability(
@@ -1327,15 +1263,14 @@ def build_observability(
     metrics: RunMetrics,
     evidence: list[Evidence],
     claims: list[Claim],
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     recommendations: list[OpportunityRecommendation],
-    battlecards: list[BattlecardItem],
 ) -> ObservabilitySnapshot:
     now = datetime.now(UTC)
     source_mix = Counter(ev.source_type for ev in evidence)
     claim_pass_rate = metrics.verified_claim_count / max(1, metrics.claim_count)
     red_team_rate = metrics.challenged_claim_count / max(1, metrics.claim_count)
-    coverage_score = average(list(matrix.coverage_by_competitor.values()) + list(matrix.coverage_by_dimension.values()))
+    coverage_score = average(list(matrix.coverage_by_paper.values()) + list(matrix.coverage_by_dimension.values()))
     confidence = average([ev.confidence for ev in evidence] + [claim.confidence for claim in claims])
     gates = [
         QualityGate(
@@ -1379,7 +1314,7 @@ def build_observability(
         tool_calls=metrics.source_candidates + metrics.sources_fetched,
         source_mix=dict(source_mix),
         dimension_coverage=matrix.coverage_by_dimension,
-        competitor_coverage=matrix.coverage_by_competitor,
+        paper_coverage=matrix.coverage_by_paper,
         claim_pass_rate=round(claim_pass_rate, 3),
         red_team_challenge_rate=round(red_team_rate, 3),
         evidence_coverage_score=round(coverage_score, 3),
@@ -1392,7 +1327,6 @@ def build_observability(
             "matrix_json": "exports/matrix.json",
             "matrix_csv": "exports/matrix.csv",
             "recommendations": "exports/recommendations.json",
-            "battlecards": "exports/battlecards.json",
             "evidence_matrix_csv": "exports/evidence_matrix.csv",
         },
     )
@@ -1440,18 +1374,18 @@ def build_evidence_graph(evidence: list[Evidence], claims: list[Claim]) -> Evide
             ),
         )
         edges.append(EvidenceGraphEdge(source=ev.evidence_id, target=source_id, edge_type="from_source", weight=ev.confidence))
-        if ev.competitor:
-            competitor_id = stable_id("competitor", ev.competitor)
+        if ev.paper:
+            paper_id = stable_id("paper", ev.paper)
             nodes.setdefault(
-                competitor_id,
+                paper_id,
                 EvidenceGraphNode(
-                    id=competitor_id,
-                    label=ev.competitor,
-                    node_type="competitor",
+                    id=paper_id,
+                    label=ev.paper,
+                    node_type="paper",
                     score=0.75,
                 ),
             )
-            edges.append(EvidenceGraphEdge(source=competitor_id, target=ev.evidence_id, edge_type="has_evidence", weight=ev.confidence))
+            edges.append(EvidenceGraphEdge(source=paper_id, target=ev.evidence_id, edge_type="has_evidence", weight=ev.confidence))
     evidence_ids = {ev.evidence_id for ev in evidence}
     for claim in claims:
         for evidence_id in claim.supporting_evidence_ids:
@@ -1480,9 +1414,9 @@ def extract_evidence_from_document(
             if sentence in used_quotes or len(sentence) < 45:
                 continue
             used_quotes.add(sentence)
-            competitor = detect_entity(sentence, document.title, document.url, entities)
+            paper = detect_entity(sentence, document.title, document.url, entities)
             quote = sentence[:500]
-            fact = build_fact(quote, competitor, dimension)
+            fact = build_fact(quote, paper, dimension)
             confidence = min(0.95, 0.38 + score * 0.09 + source_weight(document.source_type))
             evidence_id = stable_id("ev", f"{run_id}:{document.url}:{dimension}:{quote}")
             evidence_items.append(
@@ -1496,7 +1430,7 @@ def extract_evidence_from_document(
                     source_type=document.source_type,
                     dimension=dimension,
                     dimension_label=DIMENSION_LABELS.get(dimension, dimension),
-                    competitor=competitor,
+                    paper=paper,
                     fact=fact,
                     quote=quote,
                     source_title=document.title,
@@ -1522,7 +1456,7 @@ def extract_evidence_from_document(
                 source_type=document.source_type,
                 dimension="other",
                 dimension_label=DIMENSION_LABELS["other"],
-                competitor=detect_entity(sentence, document.title, document.url, entities),
+                paper=detect_entity(sentence, document.title, document.url, entities),
                 fact=build_fact(sentence, None, "other"),
                 quote=sentence,
                 source_title=document.title,
@@ -1602,8 +1536,8 @@ def evidence_coverage_counts(
     dimension_set = set(dimensions)
     counts: dict[tuple[str, str], int] = {}
     for item in evidence:
-        if item.competitor in entity_set and item.dimension in dimension_set:
-            key = (item.competitor, item.dimension)
+        if item.paper in entity_set and item.dimension in dimension_set:
+            key = (item.paper, item.dimension)
             counts[key] = counts.get(key, 0) + 1
     return counts
 
@@ -1613,8 +1547,8 @@ def evidence_cell_sufficient(count: int) -> bool:
     return count >= 5
 
 
-def build_fact(quote: str, competitor: str | None, dimension: str) -> str:
-    subject = competitor or "该来源"
+def build_fact(quote: str, paper: str | None, dimension: str) -> str:
+    subject = paper or "该论文"
     label = DIMENSION_LABELS.get(dimension, dimension)
     trimmed = quote.strip()
     if len(trimmed) > 160:
@@ -1644,7 +1578,7 @@ def stable_id(prefix: str, text: str) -> str:
 
 def build_evidence_csv(evidence: list[Evidence], by_evidence: dict[str, Evidence]) -> str:
     _ = by_evidence
-    rows = ["evidence_id,dimension,competitor,confidence,source_url,fact"]
+    rows = ["evidence_id,dimension,paper,confidence,source_url,fact"]
     for ev in evidence:
         rows.append(
             ",".join(
@@ -1652,7 +1586,7 @@ def build_evidence_csv(evidence: list[Evidence], by_evidence: dict[str, Evidence
                 for value in [
                     ev.evidence_id,
                     ev.dimension,
-                    ev.competitor or "",
+                    ev.paper or "",
                     f"{ev.confidence:.3f}",
                     ev.source_url,
                     ev.fact,
@@ -1702,34 +1636,34 @@ def coverage_points(cell: MatrixCell) -> float:
     return 0.0
 
 
-def cell_summary(competitor: str, dimension: str, items: list[Evidence]) -> str:
+def cell_summary(paper: str, dimension: str, items: list[Evidence]) -> str:
     label = DIMENSION_LABELS.get(dimension, dimension)
     if not items:
-        return f"尚未在本次公开资料中找到 {competitor} 的{label}强证据。"
+        return f"尚未在本次公开资料中找到 {paper} 的{label}强证据。"
     top = sorted(items, key=lambda ev: ev.confidence, reverse=True)[:2]
     facts = "；".join(compact_fact(ev.fact) for ev in top)
-    return f"{competitor} 在{label}维度有 {len(items)} 条证据：{facts}"
+    return f"{paper} 在{label}维度有 {len(items)} 条证据：{facts}"
 
 
 def profile_summary(
-    competitor: str, evidence: list[Evidence], strong_dimensions: list[str], weak_dimensions: list[str]
+    paper: str, evidence: list[Evidence], strong_dimensions: list[str], weak_dimensions: list[str]
 ) -> str:
     if not evidence:
-        return f"本次运行尚未形成 {competitor} 的有效公开证据画像。"
+        return f"本次运行尚未形成 {paper} 的有效公开证据画像。"
     source_count = len({ev.source_url for ev in evidence})
     strong = "、".join(strong_dimensions[:3]) or "暂无明显强覆盖维度"
     weak = "、".join(weak_dimensions[:3]) or "暂无明显缺口"
     return (
-        f"{competitor} 当前画像来自 {len(evidence)} 条 Evidence 和 {source_count} 个来源；"
+        f"{paper} 当前画像来自 {len(evidence)} 条 Evidence 和 {source_count} 个来源；"
         f"证据覆盖较强的方向是 {strong}，仍需补充验证的方向是 {weak}。"
     )
 
 
 def build_core_findings(request: ResearchRequest, matrix: CompetitorMatrix, claims: list[Claim]) -> list[str]:
     findings: list[str] = []
-    target = request.target_product
-    by_competitor = {profile.competitor: profile for profile in matrix.profiles}
-    target_profile = by_competitor.get(target)
+    target = request.target_topic
+    by_paper = {profile.paper: profile for profile in matrix.profiles}
+    target_profile = by_paper.get(target)
     if target_profile:
         strong = "、".join(target_profile.strongest_dimensions[:3]) or "暂无强覆盖维度"
         weak = "、".join(target_profile.weak_or_unknown_dimensions[:3]) or "暂无明显缺口"
@@ -1759,9 +1693,8 @@ def build_analysis_report(
     evidence: list[Evidence],
     claims: list[Claim],
     metrics: RunMetrics,
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     recommendations: list[OpportunityRecommendation],
-    battlecards: list[BattlecardItem],
     observability: ObservabilitySnapshot,
 ) -> str:
     citation_numbers, reference_lines = build_citation_index(evidence)
@@ -1788,7 +1721,7 @@ def build_analysis_report(
         "",
         *build_matrix_insights(matrix),
         "",
-        f"## {request.target_product} 的优势与不足",
+        f"## {request.target_topic} 的研究进展与空白",
         "",
         "### 已具备的优势",
         "",
@@ -1829,7 +1762,7 @@ def build_analysis_report(
             lines.extend(build_dimension_fallback_points(dimension_cells, citation_numbers))
         if dimension_evidence:
             examples = [
-                f"{item.competitor or '相关产品'}：{compact_fact(item.fact, 120)}"
+                f"{item.paper or '相关论文'}：{compact_fact(item.fact, 120)}"
                 f"{citations_for_ids([item.evidence_id], citation_numbers)}"
                 for item in dimension_evidence[:4]
             ]
@@ -1853,25 +1786,7 @@ def build_analysis_report(
                 ]
             )
     else:
-        lines.extend(["当前证据不足以形成强产品建议，应优先补齐目标产品的官方页面、定价页、用户反馈与企业化材料。", ""])
-
-    lines.extend(["## 销售战斗卡", ""])
-    if battlecards:
-        for item in battlecards[:6]:
-            cite = citations_for_ids(item.evidence_ids, citation_numbers)
-            lines.extend(
-                [
-                    f"### 面对 {item.competitor}：{item.customer_scenario}",
-                    "",
-                    f"- 竞品可承认的强项：{item.competitor_strength}{cite}",
-                    f"- 我方回应：{item.our_response}",
-                    f"- 推荐话术：{item.talk_track}",
-                    f"- 后续补齐：{item.objection_handler}",
-                    "",
-                ]
-            )
-    else:
-        lines.extend(["当前缺少足够高质量竞品证据，暂不生成销售话术。", ""])
+        lines.extend(["当前证据不足以形成强研究建议，应优先补齐相关论文和最新进展。", ""])
 
     lines.extend(
         [
@@ -1893,7 +1808,7 @@ def build_analysis_report(
             [
                 f"### {ev.evidence_id} {cite} · {ev.dimension_label}",
                 "",
-                f"- 竞品：{ev.competitor or '未识别'}",
+                f"- 论文：{ev.paper or '未识别'}",
                 f"- 事实：{ev.fact}",
                 f"- 原文片段：{ev.quote}",
                 "",
@@ -1910,7 +1825,7 @@ def build_evidence_gaps(matrix: CompetitorMatrix) -> list[str]:
     if not weak_cells:
         return ["按当前产品×维度矩阵看，未发现明显空白格；后续重点应转向证据交叉验证和时效性复核。"]
     return [
-        f"{cell.competitor} × {cell.dimension_label}：{cell.status}，当前 {cell.evidence_count} 条证据。"
+        f"{cell.paper} × {cell.dimension_label}：{cell.status}，当前 {cell.evidence_count} 条证据。"
         for cell in weak_cells[:8]
     ]
 
@@ -1965,7 +1880,7 @@ def build_target_advantage_analysis(
     claims: list[Claim],
     citation_numbers: dict[str, int],
 ) -> tuple[list[str], list[str]]:
-    target_cells = [cell for cell in matrix.cells if cell.competitor == request.target_product]
+    target_cells = [cell for cell in matrix.cells if cell.paper == request.target_topic]
     strengths: list[str] = []
     weaknesses: list[str] = []
     for cell in sorted(target_cells, key=lambda item: (coverage_points(item), item.confidence, item.evidence_count), reverse=True):
@@ -1981,7 +1896,7 @@ def build_target_advantage_analysis(
         strengths = [
             f"- {compact_fact(best_claim_text(claim), 180)}{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
             for claim in lead_claims
-        ] or [f"- 暂未形成 {request.target_product} 的强优势结论，应优先补齐官方资料和用户反馈证据。"]
+        ] or [f"- 暂未形成 {request.target_topic} 的强研究结论，应优先补齐相关论文和最新进展。"]
     if not weaknesses:
         weaknesses = ["- 暂无明显空白维度；下一步应重点验证优势是否能被第三方评测和用户声音交叉支持。"]
     return strengths[:6], weaknesses[:6]
@@ -2009,7 +1924,7 @@ def build_user_attention_analysis(
         strongest = max(cells, key=lambda item: (item.evidence_count, item.confidence))
         cite = citations_for_ids(strongest.evidence_ids, citation_numbers)
         lines.append(
-            f"- **{label}** 是用户决策中的高频关注点之一：相关证据集中在 {strongest.competitor} 等产品，"
+            f"- **{label}** 是研究中的高频关注点之一：相关证据集中在 {strongest.paper} 等论文，"
             f"说明用户会用这个维度判断工具是否值得迁移或付费。{cite}"
         )
     if not lines:
@@ -2027,8 +1942,8 @@ def build_positioning_guidance(
     strengths: list[str],
     weaknesses: list[str],
 ) -> list[str]:
-    target = request.target_product
-    target_cells = {cell.dimension: cell for cell in matrix.cells if cell.competitor == target}
+    target = request.target_topic
+    target_cells = {cell.dimension: cell for cell in matrix.cells if cell.paper == target}
     guidance = [
         f"- 把 {target} 的传播重心放在已经有证据支撑的场景上，优先讲具体工作流、适用人群和可验证结果，而不是泛泛宣称“更智能”。",
         "- 对竞品已经建立强心智的维度，宣传上不要硬碰绝对优劣，而是转成场景选择：什么时候该选我们、什么时候用户会在意集成/价格/企业治理。",
@@ -2076,10 +1991,10 @@ def build_matrix_insights(matrix: CompetitorMatrix) -> list[str]:
         laggards = [cell for cell in cells if cell.status in {"weak", "unknown"}]
         sentence = (
             f"- **{matrix.dimension_labels.get(dimension, dimension)}**："
-            f"{leader.competitor} 当前证据最强（{leader.evidence_count} 条，置信度 {leader.confidence:.2f}）。"
+            f"{leader.paper} 当前证据最强（{leader.evidence_count} 条，置信度 {leader.confidence:.2f}）。"
         )
         if laggards:
-            sentence += " 需要补证：" + "、".join(f"{cell.competitor}({cell.evidence_count}条)" for cell in laggards[:3]) + "。"
+            sentence += " 需要补证：" + "、".join(f"{cell.paper}({cell.evidence_count}条)" for cell in laggards[:3]) + "。"
         else:
             sentence += " 该维度各产品均有可用证据，适合进入横向对比。"
         lines.append(sentence)
@@ -2096,8 +2011,8 @@ def build_dimension_overview(dimension: str, cells: list[MatrixCell]) -> list[st
     lines = [
         (
             f"该维度共关联 {total} 条 Evidence；"
-            f"强覆盖产品：{'、'.join(cell.competitor for cell in strong) or '暂无'}；"
-            f"待补证产品：{'、'.join(cell.competitor for cell in weak) or '暂无'}。"
+            f"强覆盖论文：{'、'.join(cell.paper for cell in strong) or '暂无'}；"
+            f"待补证论文：{'、'.join(cell.paper for cell in weak) or '暂无'}。"
         )
     ]
     if cells:
@@ -2118,7 +2033,7 @@ def build_dimension_fallback_points(
     for cell in sorted(cells, key=lambda item: item.evidence_count, reverse=True)[:5]:
         cite = citations_for_ids(cell.evidence_ids, citation_numbers)
         lines.append(
-            f"- **{cell.competitor}**：{cell.summary} "
+            f"- **{cell.paper}**：{cell.summary} "
             f"（状态：{cell.status}；置信度：{cell.confidence:.2f}）{cite}"
         )
     lines.append("")
@@ -2146,69 +2061,69 @@ def scenario_for_dimension(dimension: str) -> str:
     }.get(dimension, "客户需要快速理解竞品差异")
 
 
-def response_for_dimension(target_product: str, dimension: str) -> str:
+def response_for_dimension(target_topic: str, dimension: str) -> str:
     return {
-        "positioning": f"把 {target_product} 的差异化场景说清楚，避免只在宏观定位上比较。",
-        "feature": f"用 {target_product} 的具体任务流、集成方式和落地路径回应功能对比。",
-        "pricing": f"把 {target_product} 的价值锚点、试用门槛和团队采购成本拆开说明。",
-        "user_voice": f"引用真实反馈承认证据边界，同时强调 {target_product} 正在优化的体验主题。",
-        "enterprise": f"围绕 {target_product} 的权限、数据边界、审计和部署策略给出可验证承诺。",
-        "strategy": f"把讨论收束到 {target_product} 当前可执行的机会主题和路线图取舍。",
-        "gtm": f"强调 {target_product} 面向目标用户的渠道、内容和生态协作方式。",
-    }.get(dimension, f"围绕 {target_product} 的真实客户场景给出证据化回应。")
+        "positioning": f"把 {target_topic} 的研究定位说清楚，避免只在宏观方向上比较。",
+        "feature": f"用 {target_topic} 的具体方法、模型架构和实验结果回应对比。",
+        "pricing": f"把 {target_topic} 的资源需求、计算成本和部署门槛拆开说明。",
+        "user_voice": f"引用真实反馈承认证据边界，同时强调 {target_topic} 正在优化的研究主题。",
+        "enterprise": f"围绕 {target_topic} 的可扩展性、鲁棒性和部署策略给出可验证承诺。",
+        "strategy": f"把讨论收束到 {target_topic} 当前可执行的研究机会和路线图取舍。",
+        "gtm": f"强调 {target_topic} 面向目标研究者的渠道、内容和生态协作方式。",
+    }.get(dimension, f"围绕 {target_topic} 的真实研究场景给出证据化回应。")
 
 
-def talk_track_for_dimension(target_product: str, competitor: str, dimension: str) -> str:
+def talk_track_for_dimension(target_topic: str, paper: str, dimension: str) -> str:
     label = DIMENSION_LABELS.get(dimension, dimension)
     return (
-        f"{competitor} 在公开资料中确实有{label}相关表达；我们的比较重点不是否认对方，"
-        f"而是确认客户当前最重要的约束，再说明 {target_product} 在该约束下能提供什么可验证价值。"
+        f"{paper} 在公开资料中确实有{label}相关表达；我们的比较重点不是否认对方，"
+        f"而是确认研究者当前最重要的约束，再说明 {target_topic} 在该约束下能提供什么可验证价值。"
     )
 
 
-def response_for_cell(target_product: str, target_cell: MatrixCell | None, competitor_cell: MatrixCell) -> str:
-    label = competitor_cell.dimension_label
+def response_for_cell(target_topic: str, target_cell: MatrixCell | None, paper_cell: MatrixCell) -> str:
+    label = paper_cell.dimension_label
     if target_cell and target_cell.status in {"strong", "partial"}:
         return (
-            f"把讨论转到客户的{label}使用场景：{target_product} 已有可引用证据，"
+            f"把讨论转到研究者的{label}使用场景：{target_topic} 已有可引用证据，"
             f"重点强调 {compact_fact(target_cell.summary, 150)}"
         )
     return (
-        f"承认 {competitor_cell.competitor} 在{label}上的公开资料更完整；"
-        f"{target_product} 当前应避免硬拼该卖点，改用已验证场景切入，并把{label}材料列为补齐项。"
+        f"承认 {paper_cell.paper} 在{label}上的公开资料更完整；"
+        f"{target_topic} 当前应避免硬拼该卖点，改用已验证场景切入，并把{label}材料列为补齐项。"
     )
 
 
 def talk_track_for_cell(
-    target_product: str,
-    competitor: str,
+    target_topic: str,
+    paper: str,
     target_cell: MatrixCell | None,
-    competitor_cell: MatrixCell,
+    paper_cell: MatrixCell,
 ) -> str:
-    label = competitor_cell.dimension_label
-    if target_cell and target_cell.status in {"strong", "partial"}:
+    label = paper_cell.dimension_label
+    if target_cell and target_cell.status in {“strong”, “partial”}:
         return (
-            f"“如果您关注{label}，{competitor} 的公开资料确实覆盖了这些点；"
-            f"但我们建议把比较放到实际工作流里看。{target_product} 目前能拿出来对照的是："
-            f"{compact_fact(target_cell.summary, 130)}。这更适合判断它是否贴合您的团队约束。”"
+            f””如果您关注{label}，{paper} 的公开资料确实覆盖了这些点；”
+            f”但我们建议把比较放到实际研究场景里看。{target_topic} 目前能拿出来对照的是：”
+            f”{compact_fact(target_cell.summary, 130)}。这更适合判断它是否贴合您的研究约束。””
         )
     return (
-        f"“在{label}上，{competitor} 的公开证据更充分，我们不建议用一句话判断谁绝对更好。"
-        f"如果这个维度是您的采购关键项，我们会先补充 {target_product} 的可验证材料；"
-        f"同时可以先从已验证的功能场景或试用结果判断是否值得进入下一轮评估。”"
+        f””在{label}上，{paper} 的公开证据更充分，我们不建议用一句话判断谁绝对更好。”
+        f”如果这个维度是您的研究关键项，我们会先补充 {target_topic} 的可验证材料；”
+        f”同时可以先从已验证的研究场景或实验结果判断是否值得进入下一轮评估。””
     )
 
 
-def followup_for_cell(target_product: str, target_cell: MatrixCell | None, competitor_cell: MatrixCell) -> str:
-    label = competitor_cell.dimension_label
+def followup_for_cell(target_topic: str, target_cell: MatrixCell | None, paper_cell: MatrixCell) -> str:
+    label = paper_cell.dimension_label
     if target_cell and target_cell.status in {"strong", "partial"}:
         return (
-            f"准备一页 {label} 对比页，放入 {target_product} 的证据链接、客户场景和可复现实测；"
-            "销售沟通中只引用已验证点，避免延展到未覆盖能力。"
+            f"准备一页 {label} 对比页，放入 {target_topic} 的证据链接、研究场景和可复现实验；"
+            "研究沟通中只引用已验证点，避免延展到未覆盖能力。"
         )
     return (
-        f"补齐 {target_product} 的{label}公开证据：产品页说明、文档、价格/权限边界、"
-        "用户案例或第三方评测至少补齐两类来源后，再把它作为主卖点。"
+        f"补齐 {target_topic} 的{label}公开证据：论文说明、实验结果、方法对比、"
+        "应用场景或第三方评测至少补齐两类来源后，再把它作为主卖点。"
     )
 
 
@@ -2221,17 +2136,17 @@ def gate_status(score: float, pass_threshold: float, fail_threshold: float) -> s
 
 
 def build_matrix_markdown(
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     citation_numbers: dict[str, int] | None = None,
 ) -> str:
     citation_numbers = citation_numbers or {}
-    headers = ["维度", *matrix.competitors]
+    headers = ["维度", *matrix.papers]
     rows = ["|" + "|".join(headers) + "|", "|" + "|".join(["---"] * len(headers)) + "|"]
-    by_key = {(cell.competitor, cell.dimension): cell for cell in matrix.cells}
+    by_key = {(cell.paper, cell.dimension): cell for cell in matrix.cells}
     for dimension in matrix.dimensions:
         row = [matrix.dimension_labels.get(dimension, dimension)]
-        for competitor in matrix.competitors:
-            cell = by_key.get((competitor, dimension))
+        for paper in matrix.papers:
+            cell = by_key.get((paper, dimension))
             if not cell:
                 row.append("暂无")
             else:
@@ -2248,14 +2163,14 @@ def csv_safe_markdown(value: str) -> str:
     return value.replace("|", "\\|").replace("\n", " ")
 
 
-def build_matrix_csv(matrix: CompetitorMatrix) -> str:
-    rows = ["competitor,dimension,dimension_label,status,confidence,evidence_count,summary,evidence_ids"]
+def build_matrix_csv(matrix: PaperPatternMatrix) -> str:
+    rows = ["paper,dimension,dimension_label,status,confidence,evidence_count,summary,evidence_ids"]
     for cell in matrix.cells:
         rows.append(
             ",".join(
                 csv_escape(str(value))
                 for value in [
-                    cell.competitor,
+                    cell.paper,
                     cell.dimension,
                     cell.dimension_label,
                     cell.status,
@@ -2290,26 +2205,6 @@ def build_recommendations_markdown(recommendations: list[OpportunityRecommendati
     return "\n".join(lines)
 
 
-def build_battlecards_markdown(battlecards: list[BattlecardItem]) -> str:
-    if not battlecards:
-        return "# Battlecards\n\n当前没有足够证据生成战斗卡。\n"
-    lines = ["# Battlecards", ""]
-    for item in battlecards:
-        lines.extend(
-            [
-                f"## {item.competitor} - {item.customer_scenario}",
-                "",
-                f"- Competitor strength: {item.competitor_strength}",
-                f"- Our response: {item.our_response}",
-                f"- Talk track: {item.talk_track}",
-                f"- Objection handler: {item.objection_handler}",
-                f"- Evidence: {', '.join(item.evidence_ids)}",
-                "",
-            ]
-        )
-    return "\n".join(lines)
-
-
 def build_executive_summary(
     request: ResearchRequest,
     metrics: RunMetrics,
@@ -2319,7 +2214,7 @@ def build_executive_summary(
     lines = [
         f"# {request.project_name} · Executive Summary",
         "",
-        f"目标产品：{request.target_product}",
+        f"研究方向：{request.target_topic}",
         f"本次运行获得 {metrics.sources_fetched} 篇可用内容，抽取 {metrics.evidence_count} 条 Evidence，生成 {metrics.claim_count} 条 Claim。",
         f"综合覆盖度：{observability.evidence_coverage_score:.0%}；报告可信度：{observability.report_confidence:.0%}。",
         "",
@@ -2340,7 +2235,7 @@ def build_methodology(request: ResearchRequest, observability: ObservabilitySnap
     )
     return (
         f"# Methodology\n\n"
-        f"CompeteGraph 对「{request.project_name}」执行了 5 Agent deep research 流程："
+        f"ScholarInsight 对「{request.project_name}」执行了 5 Agent deep research 流程："
         "ResearchPlanningAgent 规划研究范围与质量规则，SourceResearchAgent 发现来源并抓取网页，"
         "EvidenceStructuringAgent 抽取可溯源事实，AnalysisAndReviewAgent 生成结论、反方审查并整理矩阵/建议/战斗卡，"
         "ReportComposerAgent 生成本地 Markdown、JSON 与 CSV 交付文件。\n\n"

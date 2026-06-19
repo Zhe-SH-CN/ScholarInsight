@@ -49,7 +49,7 @@ class RunRepository:
         status = RunStatus(
             run_id=run_id,
             project_name=request.project_name,
-            target_product=request.target_product,
+            target_topic=request.target_topic,
             owner=owner,
             status="queued",
             started_at=now,
@@ -196,7 +196,6 @@ class RunRepository:
         methodology = await read_text(run_dir / "reports" / "methodology.md")
         matrix_data = await read_json(run_dir / "exports" / "matrix.json")
         recommendations_data = await read_json(run_dir / "exports" / "recommendations.json", [])
-        battlecards_data = await read_json(run_dir / "exports" / "battlecards.json", [])
         observability_data = await read_json(run_dir / "exports" / "observability.json")
         graph_data = await read_json(run_dir / "exports" / "evidence_graph.json")
         evidence_summaries: list[EvidenceSummary] = []
@@ -216,9 +215,8 @@ class RunRepository:
             evidence=evidence_summaries,
             claims=[Claim(**row) for row in claim_rows],
             trace=[TraceEvent(**row) for row in trace_rows],
-            matrix=CompetitorMatrix(**matrix_data) if matrix_data else None,
+            matrix=PaperPatternMatrix(**matrix_data) if matrix_data else None,
             recommendations=[OpportunityRecommendation(**row) for row in recommendations_data],
-            battlecards=[BattlecardItem(**row) for row in battlecards_data],
             observability=ObservabilitySnapshot(**observability_data) if observability_data else None,
             evidence_graph=EvidenceGraph(**graph_data) if graph_data else None,
             report_markdown=report,

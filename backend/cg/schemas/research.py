@@ -1,4 +1,4 @@
-"""Core schemas for the first end-to-end CompeteGraph research loop."""
+"""Core schemas for ScholarInsight academic paper reasoning analysis."""
 
 from __future__ import annotations
 
@@ -50,9 +50,9 @@ class ResearchRequest(BaseModel):
     """User-facing request for a real research run."""
 
     project_name: str = Field(default="论文推理模式分析", min_length=1, max_length=120)
-    target_product: str = Field(default="Retrieval-Augmented Generation", min_length=1, max_length=80)
-    product_description: str = Field(default="", max_length=300)
-    competitors: list[str] = Field(default_factory=lambda: [])
+    target_topic: str = Field(default="Retrieval-Augmented Generation", min_length=1, max_length=80)
+    topic_description: str = Field(default="", max_length=300)
+    seed_papers: list[str] = Field(default_factory=lambda: [])
     analysis_dimensions: list[str] = Field(default_factory=lambda: DEFAULT_DIMENSIONS.copy())
     research_goal: str = Field(
         default="分析该研究方向中论文之间的创新关系和推理模式分布", max_length=1000
@@ -63,7 +63,7 @@ class ResearchRequest(BaseModel):
     auto_discover_sources: bool = True
     max_search_rounds: int = Field(default=3, ge=1, le=8)
 
-    @field_validator("competitors", "analysis_dimensions", mode="before")
+    @field_validator("seed_papers", "analysis_dimensions", mode="before")
     @classmethod
     def split_string_list(cls, value: Any) -> Any:
         if isinstance(value, str):
@@ -110,7 +110,7 @@ class SourceTask(BaseModel):
 
 class ResearchPlan(BaseModel):
     research_goal: str
-    competitors: list[str] = Field(default_factory=list)
+    papers: list[str] = Field(default_factory=list)
     dimensions: list[str] = Field(default_factory=list)
     queries: list[str] = Field(default_factory=list)
     source_tasks: list[SourceTask] = Field(default_factory=list)
@@ -151,7 +151,7 @@ class Evidence(BaseModel):
     source_type: str
     dimension: str = "other"
     dimension_label: str = "其他"
-    competitor: str | None = None
+    paper: str | None = None
     fact: str
     quote: str
     source_title: str
@@ -174,7 +174,7 @@ class EvidenceSummary(BaseModel):
     evidence_id: str
     dimension: str
     dimension_label: str
-    competitor: str | None = None
+    paper: str | None = None
     fact: str
     quote_preview: str
     source_title: str
@@ -244,7 +244,6 @@ class RunMetrics(BaseModel):
     challenged_claim_count: int = 0
     matrix_cell_count: int = 0
     recommendation_count: int = 0
-    battlecard_count: int = 0
     average_evidence_confidence: float = 0
     coverage_score: float = 0
 
@@ -252,7 +251,7 @@ class RunMetrics(BaseModel):
 class RunStatus(BaseModel):
     run_id: str
     project_name: str
-    target_product: str
+    target_topic: str
     owner: str | None = None
     status: Literal["queued", "running", "completed", "failed", "stopped"]
     current_stage: str = "queued"
@@ -272,8 +271,8 @@ class EvidenceLink(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
-class CompetitorProfile(BaseModel):
-    competitor: str
+class PaperProfile(BaseModel):
+    paper: str
     summary: str
     evidence_count: int = 0
     source_count: int = 0
@@ -284,7 +283,7 @@ class CompetitorProfile(BaseModel):
 
 
 class MatrixCell(BaseModel):
-    competitor: str
+    paper: str
     dimension: str
     dimension_label: str
     summary: str
@@ -295,14 +294,14 @@ class MatrixCell(BaseModel):
     status: Literal["strong", "partial", "weak", "unknown"] = "unknown"
 
 
-class CompetitorMatrix(BaseModel):
+class PaperPatternMatrix(BaseModel):
     generated_at: datetime
-    competitors: list[str] = Field(default_factory=list)
+    papers: list[str] = Field(default_factory=list)
     dimensions: list[str] = Field(default_factory=list)
     dimension_labels: dict[str, str] = Field(default_factory=dict)
     cells: list[MatrixCell] = Field(default_factory=list)
-    profiles: list[CompetitorProfile] = Field(default_factory=list)
-    coverage_by_competitor: dict[str, float] = Field(default_factory=dict)
+    profiles: list[PaperProfile] = Field(default_factory=list)
+    coverage_by_paper: dict[str, float] = Field(default_factory=dict)
     coverage_by_dimension: dict[str, float] = Field(default_factory=dict)
 
 
@@ -318,18 +317,6 @@ class OpportunityRecommendation(BaseModel):
     evidence_ids: list[str] = Field(default_factory=list)
     next_steps: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
-    confidence: float = Field(default=0.5, ge=0, le=1)
-
-
-class BattlecardItem(BaseModel):
-    item_id: str
-    competitor: str
-    customer_scenario: str
-    competitor_strength: str
-    our_response: str
-    talk_track: str
-    objection_handler: str
-    evidence_ids: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
 
 
@@ -350,7 +337,7 @@ class ObservabilitySnapshot(BaseModel):
     tool_calls: int = 0
     source_mix: dict[str, int] = Field(default_factory=dict)
     dimension_coverage: dict[str, float] = Field(default_factory=dict)
-    competitor_coverage: dict[str, float] = Field(default_factory=dict)
+    paper_coverage: dict[str, float] = Field(default_factory=dict)
     claim_pass_rate: float = Field(default=0, ge=0, le=1)
     red_team_challenge_rate: float = Field(default=0, ge=0, le=1)
     evidence_coverage_score: float = Field(default=0, ge=0, le=1)
@@ -362,7 +349,7 @@ class ObservabilitySnapshot(BaseModel):
 class EvidenceGraphNode(BaseModel):
     id: str
     label: str
-    node_type: Literal["claim", "evidence", "source", "competitor", "dimension"]
+    node_type: Literal["claim", "evidence", "source", "paper", "dimension"]
     score: float = Field(default=0.5, ge=0, le=1)
     meta: dict[str, Any] = Field(default_factory=dict)
 
@@ -390,9 +377,8 @@ class RunDetail(BaseModel):
     evidence: list[EvidenceSummary] = Field(default_factory=list)
     claims: list[Claim] = Field(default_factory=list)
     trace: list[TraceEvent] = Field(default_factory=list)
-    matrix: CompetitorMatrix | None = None
+    matrix: PaperPatternMatrix | None = None
     recommendations: list[OpportunityRecommendation] = Field(default_factory=list)
-    battlecards: list[BattlecardItem] = Field(default_factory=list)
     observability: ObservabilitySnapshot | None = None
     evidence_graph: EvidenceGraph | None = None
     report_markdown: str = ""
@@ -414,7 +400,7 @@ class QuickExtractResponse(BaseModel):
 class ResearchGap(BaseModel):
     """Analysis Agent 反馈给 Planning Agent 的信息缺口。"""
     dimension: str
-    competitor: str
+    paper: str
     reason: str
     priority: Literal["high", "medium", "low"] = "medium"
     suggested_queries: list[str] = Field(default_factory=list)

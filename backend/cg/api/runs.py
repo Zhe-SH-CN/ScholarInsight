@@ -23,27 +23,6 @@ class RenameRunRequest(BaseModel):
     project_name: str = Field(min_length=1, max_length=120)
 
 
-class SuggestCompetitorsRequest(BaseModel):
-    product_name: str
-    product_description: str = ""
-
-
-class SuggestCompetitorsResponse(BaseModel):
-    competitors: list[dict]  # [{name, reason}]
-    llm_configured: bool
-
-
-# ── LLM 必要性校验规则候选竞品（按行业关键词）──
-_RULE_COMPETITORS: dict[str, list[str]] = {
-    "coding": ["Cursor", "GitHub Copilot", "Windsurf", "Codeium", "Tabnine"],
-    "ai": ["ChatGPT", "Claude", "Gemini", "Kimi", "文心一言"],
-    "ide": ["Cursor", "GitHub Copilot", "Windsurf", "JetBrains AI", "Codeium"],
-    "design": ["Figma", "Sketch", "Adobe XD", "Framer", "Motiff"],
-    "crm": ["Salesforce", "HubSpot", "Zoho CRM", "Pipedrive", "飞书 CRM"],
-    "erp": ["SAP", "Oracle ERP", "用友", "金蝶", "浪潮"],
-    "analytics": ["Tableau", "Power BI", "Metabase", "Grafana", "DataV"],
-}
-
 
 @router.post("/runs", response_model=RunStarted)
 async def start_run(
@@ -176,8 +155,7 @@ async def chat_about_run(
         raise HTTPException(status_code=404, detail=f"Run not found: {run_id}") from exc
 
     parts: list[str] = [
-        f"**目标产品**: {detail.request.target_product}",
-        f"**竞品**: {', '.join(detail.request.competitors)}",
+        f"**研究方向**: {detail.request.target_topic}",
         f"**研究目标**: {detail.request.research_goal}",
     ]
     if detail.executive_summary_markdown:
@@ -198,7 +176,7 @@ async def chat_about_run(
     try:
         response = await client.complete(
             system=(
-                "你是一位竞品情报分析师。请基于提供的研究上下文简洁地回答问题。"
+                "你是一位学术论文分析专家。请基于提供的研究上下文简洁地回答问题。"
                 "如果上下文不足以回答，请明确说明。用与用户提问相同的语言回复。"
             ),
             user=f"## 研究上下文\n\n{context}\n\n---\n\n问题：{body.message}",
@@ -206,59 +184,3 @@ async def chat_about_run(
         return {"response": response}
     except Exception as exc:  # noqa: BLE001
         return {"response": f"LLM 调用出错：{str(exc)[:300]}"}
-
-
-@router.post("/suggest_competitors", response_model=SuggestCompetitorsResponse)
-async def suggest_competitors(
-    body: SuggestCompetitorsRequest,
-    username: str = Depends(require_session_user),
-) -> SuggestCompetitorsResponse:
-    """根据目标产品和描述，推荐不超过 5 个竞品。"""
-    _ = username
-    settings = get_settings()
-
-    if not settings.active_llm_api_key:
-        # 规则 fallback
-        desc_lower = (body.product_name + " " + body.product_description).lower()
-        candidates: list[str] = []
-        for keyword, names in _RULE_COMPETITORS.items():
-            if keyword in desc_lower:
-                candidates = names
-                break
-        if not candidates:
-            candidates = ["ChatGPT", "Gemini", "Kimi", "文心一言", "Copilot"]
-        return SuggestCompetitorsResponse(
-            competitors=[{"name": n, "reason": "基于产品类型规则推荐"} for n in candidates[:5]],
-            llm_configured=False,
-        )
-
-    from cg.llm.client import LLMClient  # noqa: PLC0415
-    client = LLMClient(settings)
-    try:
-        data = await client.complete_json(
-            system=(
-                "你是竞品分析专家。根据用户提供的目标产品名称和描述，推荐最相关的竞品。\n"
-                "输出 JSON：{competitors: [{name: '产品名', reason: '一句话推荐理由'}]}\n"
-                "规则：\n"
-                "1. 最多推荐 5 个竞品\n"
-                "2. 竞品必须是同类型产品（功能、用途、目标用户相似）\n"
-                "3. 优先推荐知名度较高、公开资料丰富的产品\n"
-                "4. reason 用中文，不超过 30 字"
-            ),
-            user=(
-                f"目标产品：{body.product_name}\n"
-                f"产品描述：{body.product_description or '（未提供）'}"
-            ),
-        )
-        raw = data.get("competitors") or []
-        competitors = [
-            {"name": str(c.get("name") or ""), "reason": str(c.get("reason") or "")}
-            for c in raw[:5]
-            if isinstance(c, dict) and c.get("name")
-        ]
-        return SuggestCompetitorsResponse(competitors=competitors, llm_configured=True)
-    except Exception:  # noqa: BLE001
-        return SuggestCompetitorsResponse(
-            competitors=[{"name": n, "reason": "基于产品类型规则推荐"} for n in ["Cursor", "GitHub Copilot", "Windsurf", "Codeium", "Tabnine"][:5]],
-            llm_configured=True,
-        )

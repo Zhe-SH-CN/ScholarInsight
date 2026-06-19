@@ -1,4 +1,4 @@
-"""本地论文检索工具，替代 CompeteInsight 的 Web SearchTool。
+"""本地论文检索工具，替代 Web SearchTool。
 
 使用 sentence-transformers (bge-large-en-v1.5) + numpy 做 embedding 检索。
 """
@@ -101,7 +101,7 @@ class LocalPaperIndex:
 
 
 class LocalPaperSearchTool:
-    """与 CompeteInsight SearchTool 接口兼容的本地论文检索。"""
+    """与 SearchTool 接口兼容的本地论文检索。"""
 
     def __init__(self, settings: Settings):
         self.settings = settings

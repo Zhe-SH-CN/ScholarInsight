@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     # --- HTTP ---
     cg_http_timeout_seconds: int = 30
     cg_http_proxy: str = ""
-    cg_user_agent: str = "CompeteGraphBot/0.1"
+    cg_user_agent: str = "ScholarInsightBot/0.1"
 
     # --- 日志 ---
     cg_log_level: str = "INFO"

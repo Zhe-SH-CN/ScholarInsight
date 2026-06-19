@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 
 
 class AuthenticatedStaticFiles(StaticFiles):
-    """StaticFiles variant that requires a valid CompeteGraph session cookie."""
+    """StaticFiles variant that requires a valid ScholarInsight session cookie."""
 
     async def get_response(self, path: str, scope):
         request = Request(scope)
@@ -82,9 +82,9 @@ def _init_data_dir(data_dir: Path) -> None:
 def create_app() -> FastAPI:
     settings = get_settings()
     app = FastAPI(
-        title="CompeteGraph API",
+        title="ScholarInsight API",
         version="0.1.0",
-        description="AI 驱动的可溯源竞品分析 Agent 协作系统",
+        description="学术论文推理模式分析 Agent 协作系统",
         default_response_class=ORJSONResponse,
         lifespan=lifespan,
     )
@@ -111,7 +111,7 @@ def create_app() -> FastAPI:
     @app.get("/", tags=["meta"])
     async def root() -> dict[str, str]:
         return {
-            "name": "CompeteGraph API",
+            "name": "ScholarInsight API",
             "version": app.version,
             "docs": "/docs",
             "health": "/health",

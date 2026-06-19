@@ -30,16 +30,15 @@ skills:
     purpose: Compose a readable Markdown report from reviewed Claims and structured assets.
     method:
       - Start with executive summary and run metrics.
-      - Present competitor profiles and matrix.
-      - Present opportunity recommendations and battlecards.
+      - Present paper profiles and matrix.
+      - Present research recommendations.
       - Include quality notes and Red Team findings.
       - Include Evidence appendix.
     input_schema:
       claims: Claim[]
       evidence: Evidence[]
-      matrix: CompetitorMatrix
+      matrix: PaperPatternMatrix
       recommendations: OpportunityRecommendation[]
-      battlecards: BattlecardItem[]
       observability: ObservabilitySnapshot
     output_schema:
       markdown: string
@@ -50,7 +49,7 @@ skills:
   - id: skill.citation_rendering.v1
     purpose: Render source links and Evidence appendix entries consistently.
     method:
-      - Render Evidence ID, dimension, competitor, source title, source URL, fact, quote.
+      - Render Evidence ID, dimension, paper, source title, source URL, fact, quote.
       - Keep source URLs clickable in Markdown.
       - Keep quote text short enough for scanability but long enough for audit.
     input_schema:

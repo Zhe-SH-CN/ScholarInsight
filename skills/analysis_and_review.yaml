@@ -18,8 +18,6 @@ artifact_contract:
     - exports/matrix.csv
     - exports/recommendations.json
     - exports/recommendations.md
-    - exports/battlecards.json
-    - exports/battlecards.md
     - exports/evidence_graph.json
     - exports/observability.json
 quality_metrics:
@@ -31,12 +29,11 @@ failure_modes:
   - Claim overgeneralizes from a single official page.
   - User review source is treated as representative market evidence.
   - Recommendation is not tied back to Claim or Evidence.
-  - Battlecard language becomes absolute or adversarial without evidence.
 skills:
   - id: skill.claim_generation.v1
     purpose: Aggregate Evidence into bounded, reviewable Claims.
     method:
-      - Group Evidence by dimension and competitor.
+      - Group Evidence by dimension and paper.
       - Select strongest supporting Evidence by confidence and source diversity.
       - Generate one or more Claims per populated dimension.
       - Attach reasoning_summary and supporting_evidence_ids.
@@ -66,11 +63,10 @@ skills:
       - verification_status is verified or needs_evidence.
       - final_wording is set for report use.
   - id: skill.asset_synthesis.v1
-    purpose: Build business-facing assets from reviewed Claims and Evidence.
+    purpose: Build research-facing assets from reviewed Claims and Evidence.
     method:
-      - Build competitor matrix by competitor x dimension.
-      - Build opportunity recommendations from strong/weak coverage patterns.
-      - Build battlecards from competitor strengths and target-product responses.
+      - Build paper pattern matrix by paper x dimension.
+      - Build research recommendations from strong/weak coverage patterns.
       - Build evidence graph nodes and edges for traceability.
       - Build observability quality gates.
     input_schema:
@@ -78,12 +74,10 @@ skills:
       evidence: Evidence[]
       request: ResearchRequest
     output_schema:
-      matrix: CompetitorMatrix
+      matrix: PaperPatternMatrix
       recommendations: OpportunityRecommendation[]
-      battlecards: BattlecardItem[]
       evidence_graph: EvidenceGraph
       observability: ObservabilitySnapshot
     acceptance:
       - Matrix unknown cells remain explicit.
       - Recommendations include evidence_ids when possible.
-      - Battlecards avoid unsupported superiority claims.

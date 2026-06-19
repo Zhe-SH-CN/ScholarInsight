@@ -33,7 +33,7 @@ class EvidenceRepository:
             evidence_id=evidence.evidence_id,
             dimension=evidence.dimension,
             dimension_label=evidence.dimension_label,
-            competitor=evidence.competitor,
+            paper=evidence.paper,
             fact=evidence.fact,
             quote_preview=evidence.quote[:180],
             source_title=evidence.source_title,

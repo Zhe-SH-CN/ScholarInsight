@@ -7,7 +7,7 @@ mission: >
   and mechanism for each evidence item.
 research_principles:
   - Evidence records facts; Claims and recommendations happen later.
-  - Unknown competitor is acceptable when the source does not identify one.
+  - Unknown paper is acceptable when the source does not identify one.
   - A quote must be copied from the source text, not paraphrased.
   - Confidence measures extraction quality, not business truth.
 artifact_contract:
@@ -21,7 +21,7 @@ quality_metrics:
 failure_modes:
   - LLM returns quotes that are not in the source document.
   - Extracted fact is actually an opinion or recommendation.
-  - Competitor detection overfits on URL host names.
+  - Paper detection overfits on URL host names.
   - Long marketing pages produce duplicate Evidence.
 skills:
   - id: skill.evidence_extraction.v1
@@ -61,12 +61,12 @@ skills:
       - quote is a continuous source-text span.
       - quote_preview can be displayed in the frontend.
   - id: skill.source_attribution.v1
-    purpose: Attach source, dimension, competitor, and confidence metadata.
+    purpose: Attach source, dimension, paper, and confidence metadata.
     method:
       - Attach source_id, source_url, source_title, source_type, fetched_at.
       - Calculate authority, freshness, relevance, and confidence scores.
-      - Detect competitor only when text/title/URL provides enough signal.
-      - Keep unknown competitor instead of guessing.
+      - Detect paper only when text/title/URL provides enough signal.
+      - Keep unknown paper instead of guessing.
     input_schema:
       evidence: Evidence
       source: SourceDocument

@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 from cg.agents.runtime import BaseAgent
 from cg.schemas.research import (
     Claim,
-    CompetitorMatrix,
+    PaperPatternMatrix,
     DEFAULT_DIMENSIONS,
     DIMENSION_LABELS,
     Evidence,
@@ -106,7 +106,7 @@ class ResearchPlanningAgent(BaseAgent):
         feedback_context = ""
         if feedback and feedback.gaps:
             gaps_str = "\n".join(
-                f"- 竞品【{g.competitor}】的【{DIMENSION_LABELS.get(g.dimension, g.dimension)}】"
+                f"- 论文【{g.paper}】的【{DIMENSION_LABELS.get(g.dimension, g.dimension)}】"
                 f"维度：{g.reason}（优先级：{g.priority}）"
                 + (f"\n  建议查询：{', '.join(g.suggested_queries)}" if g.suggested_queries else "")
                 for g in feedback.gaps
@@ -168,10 +168,9 @@ class ResearchPlanningAgent(BaseAgent):
             ),
             user=(
                 f"项目名：{request.project_name}\n"
-                f"目标产品：{request.target_product}"
-                + (f"（产品描述：{request.product_description}）" if request.product_description else "")
-                + f"\n竞品列表：{', '.join(request.competitors)}\n"
-                f"分析维度：{', '.join(request.analysis_dimensions)}\n"
+                f"研究方向：{request.target_topic}"
+                + (f"（方向描述：{request.topic_description}）" if request.topic_description else "")
+                + f"\n分析维度：{', '.join(request.analysis_dimensions)}\n"
                 f"研究目标：{request.research_goal}"
                 + feedback_context
             ),
@@ -229,7 +228,7 @@ class ResearchPlanningAgent(BaseAgent):
         queries = [task.query for task in parsed_tasks]
         return ResearchPlan(
             research_goal=str(data.get("research_goal") or deterministic.research_goal),
-            competitors=coerce_str_list(data.get("competitors")) or deterministic.competitors,
+            papers=coerce_str_list(data.get("papers")) or deterministic.papers,
             dimensions=normalize_dimensions(coerce_str_list(data.get("dimensions"))) or deterministic.dimensions,
             queries=queries[:32],
             source_tasks=parsed_tasks[:32],
@@ -351,7 +350,7 @@ class SourceResearchAgent(BaseAgent):
                             "outer_loop_round": loop_round,
                             "coverage": estimate_coverage(
                                 candidates,
-                                [request.target_product, *request.competitors],
+                                [request.target_topic],
                                 request.analysis_dimensions,
                             ),
                             "candidate_count": len(candidates),
@@ -363,7 +362,7 @@ class SourceResearchAgent(BaseAgent):
             if not next_tasks:
                 coverage = estimate_coverage(
                     candidates,
-                    [request.target_product, *request.competitors],
+                    [request.target_topic],
                     request.analysis_dimensions,
                 )
                 if coverage < self.ctx.settings.cg_min_coverage_to_stop:
@@ -428,11 +427,11 @@ class SourceResearchAgent(BaseAgent):
             # 覆盖度充足提前停止
             coverage = estimate_coverage(
                 candidates,
-                [request.target_product, *request.competitors],
+                [request.target_topic],
                 request.analysis_dimensions,
             )
             dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
-            entities = [request.target_product, *request.competitors]
+            entities = [request.target_topic]
             covered_pairs = infer_candidate_pairs(candidates, plan.source_tasks, entities, dimensions)
             empty_pairs = [
                 (entity, dimension)
@@ -479,7 +478,7 @@ class SourceResearchAgent(BaseAgent):
                 "should_stop": False,
             }
 
-        entities = [request.target_product, *request.competitors]
+        entities = [request.target_topic]
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
         pair_counts = candidate_pair_counts(current_candidates, plan.source_tasks, entities, dimensions)
         provider_counts = Counter(c.source_provider for c in current_candidates if c.source_provider)
@@ -497,7 +496,7 @@ class SourceResearchAgent(BaseAgent):
                 "你要判断当前搜索内容是否足够支撑后续 Evidence 和 Analysis。\n\n"
                 "【停止条件，必须同时满足】\n"
                 "1. 每个产品×每个维度至少有 3 条不同 URL 的候选内容\n"
-                "2. 定价维度必须尽量有官方定价页或可信 pricing 来源\n"
+                "2. 核心方向必须有代表性论文和最新进展\n"
                 "3. 用户口碑维度必须有知乎/社区/评测类用户声音\n"
                 "4. Analysis Agent 反馈的缺口已经被补上\n"
                 "5. 最近搜索仍有新增内容；若连续两轮没有新增，系统会自动停止\n\n"
@@ -510,14 +509,13 @@ class SourceResearchAgent(BaseAgent):
                 '  "should_stop": false,\n'
                 '  "stop_reason": "",\n'
                 '  "max_results_per_provider": 5,\n'
-                '  "next_tasks": [{"entity":"产品","dimension":"pricing","intent":"pricing","query":"...","rationale":"..."}]\n'
+                '  "next_tasks": [{"entity":"研究方向","dimension":"推理模式","intent":"official","query":"...","rationale":"..."}]\n'
                 "}"
             ),
             user=(
                 f"外层 Research Loop：第 {loop_round} 轮\n"
                 f"Search 内部轮次：第 {round_num} 轮\n"
-                f"目标产品：{request.target_product}\n"
-                f"竞品：{', '.join(request.competitors)}\n"
+                f"研究方向：{request.target_topic}\n"
                 f"维度：{', '.join(dimensions)}\n"
                 f"Analysis 反馈：{feedback.message if feedback else '无'}\n"
                 f"Feedback gaps：{[gap.model_dump(mode='json') for gap in (feedback.gaps if feedback else [])]}\n\n"
@@ -567,7 +565,7 @@ class SourceResearchAgent(BaseAgent):
                 dimension = "other"
             tasks.append(SourceTask(
                 task_id=f"react_r{round_num}_{i + 1:02d}",
-                entity=str(row.get("entity") or request.target_product).strip(),
+                entity=str(row.get("entity") or request.target_topic).strip(),
                 dimension=dimension,
                 intent=intent,  # type: ignore[arg-type]
                 query=query,
@@ -598,7 +596,7 @@ class SourceResearchAgent(BaseAgent):
         dimension_url_counts = Counter[str]()
         for c in current_candidates:
             text = f"{c.url} {c.title} {c.snippet}".lower()
-            for entity in [request.target_product, *request.competitors]:
+            for entity in [request.target_topic]:
                 if entity.lower() in text:
                     entity_url_counts[entity] += 1
             for dim in request.analysis_dimensions:
@@ -670,13 +668,11 @@ class SourceResearchAgent(BaseAgent):
                 "next_tasks 每次最多 8 条，intent 只能是：official / docs / review / comparison"
             ),
             user=(
-                f"目标产品：{request.target_product}"
-                + (f"（{request.product_description}）" if request.product_description else "")
-                + f"\n竞品：{', '.join(request.competitors)}\n"
-                f"分析维度：{[DIMENSION_LABELS.get(d, d) for d in request.analysis_dimensions]}\n"
+                f"研究方向：{request.target_topic}"
+                + (f"（{request.topic_description}）" if request.topic_description else "")
+                + f"\n分析维度：{[DIMENSION_LABELS.get(d, d) for d in request.analysis_dimensions]}\n"
                 f"当前第 {round_num} 轮（共最多 {getattr(request, 'max_search_rounds', 3)} 轮）\n\n"
                 f"当前搜索覆盖状态：\n"
-                f"- 各产品已有来源数：{dict(entity_url_counts)}\n"
                 f"- 各维度已有来源数：{ {DIMENSION_LABELS.get(d, d): dimension_url_counts[d] for d in request.analysis_dimensions} }\n"
                 f"- 总来源数：{len(current_candidates)}\n"
                 f"- 已知URL（用于去重，勿重复）：{list(seen_urls)[:30]}"
@@ -716,7 +712,7 @@ class SourceResearchAgent(BaseAgent):
             use_zhihu = bool(row.get("use_zhihu", False))
             tasks.append(SourceTask(
                 task_id=f"react_r{round_num}_{i + 1:02d}",
-                entity=str(row.get("entity") or request.target_product).strip(),
+                entity=str(row.get("entity") or request.target_topic).strip(),
                 dimension=dimension,
                 intent=intent,  # type: ignore[arg-type]
                 query=query,
@@ -734,7 +730,7 @@ class SourceResearchAgent(BaseAgent):
         round_num: int,
     ) -> list[SourceTask]:
         """无 LLM 时基于覆盖缺口规则生成补充任务。"""
-        entities = [request.target_product, *request.competitors]
+        entities = [request.target_topic]
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
         covered = infer_candidate_pairs(candidates, plan.source_tasks, entities, dimensions)
         tasks: list[SourceTask] = []
@@ -948,7 +944,7 @@ class EvidenceStructuringAgent(BaseAgent):
                 "8. confidence 按证据强度打分：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"competitor", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                '输出 JSON：{"evidence":[{"paper", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
                 "每篇论文最多提取 8 条，只保留有实质创新信息的。"
             )
         else:
@@ -973,15 +969,14 @@ class EvidenceStructuringAgent(BaseAgent):
                 "9. 同一创新点只提取一次，不要重复\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"competitor", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                '输出 JSON：{"evidence":[{"paper", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
                 "每篇论文最多提取 10 条最重要的创新证据。"
             )
 
         data = await self.invoke_json(
             system=system_prompt,
             user=(
-                f"目标产品：{request.target_product}\n"
-                f"竞品：{', '.join(request.competitors)}\n"
+                f"研究方向：{request.target_topic}\n"
                 f"来源类型：{document.source_type}\n"
                 f"网页标题：{document.title}\n"
                 f"URL：{document.url}\n\n"
@@ -1009,7 +1004,7 @@ class EvidenceStructuringAgent(BaseAgent):
                 continue
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
             evidence_id = stable_id_fn("ev", f"{self.ctx.run_id}:{document.url}:{dimension}:{quote}")
-            competitor = str(row.get("competitor") or "").strip() or None
+            paper = str(row.get("paper") or "").strip() or None
             freshness = compute_freshness_score(document.published_at, dimension)
             items.append(
                 Evidence(
@@ -1022,7 +1017,7 @@ class EvidenceStructuringAgent(BaseAgent):
                     source_type=document.source_type,
                     dimension=dimension,
                     dimension_label=DIMENSION_LABELS.get(dimension, dimension),
-                    competitor=competitor,
+                    paper=paper,
                     fact=fact[:500],
                     quote=quote[:500],
                     source_title=document.title,
@@ -1050,8 +1045,7 @@ class AnalysisAndReviewAgent(BaseAgent):
             return deterministic_claims
 
         # 从 evidence 或 request 里推断产品名
-        target = request.target_product if request else "目标产品"
-        competitors_str = ", ".join(request.competitors) if request else "竞品"
+        topic = request.target_topic if request else "研究方向"
 
         # 按维度聚合 Evidence，便于 LLM 做横向对比
         by_dim: dict[str, list[dict]] = {}
@@ -1059,7 +1053,7 @@ class AnalysisAndReviewAgent(BaseAgent):
             dim = ev.dimension
             by_dim.setdefault(dim, []).append({
                 "evidence_id": ev.evidence_id,
-                "competitor": ev.competitor,
+                "paper": ev.paper,
                 "fact": ev.fact,
                 "quote": ev.quote[:200],
                 "source_type": ev.source_type,
@@ -1096,13 +1090,12 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "}]}"
             ),
             user=(
-                f"目标产品：{target}\n"
-                f"竞品：{competitors_str}\n\n"
-                "按维度聚合的 Evidence（请逐维度分析，生成对比型结论）：\n"
+                f"研究方向：{topic}\n\n"
+                "按维度聚合的 Evidence（请逐维度分析，生成推理模式结论）：\n"
                 + "\n\n".join(
                     f"=== {DIMENSION_LABELS.get(dim, dim)} 维度（{len(items)} 条证据）===\n"
                     + "\n".join(
-                        f"[{ev['evidence_id']}] {ev['competitor'] or '?'} | {ev['source_type']} | "
+                        f"[{ev['evidence_id']}] {ev['paper'] or '?'} | {ev['source_type']} | "
                         f"置信度{ev['confidence']:.2f}\n事实：{ev['fact']}\n摘要：{ev['quote'][:120]}"
                         for ev in items[:8]
                     )
@@ -1276,17 +1269,16 @@ class AnalysisAndReviewAgent(BaseAgent):
         *,
         matrix_builder: Callable[[list[Evidence], list[str], list[str]], Any],
         recommendations_builder: Callable[[str, ResearchRequest, list[Claim], list[Evidence], Any], list[Any]],
-        battlecards_builder: Callable[[str, ResearchRequest, list[Claim], Any], list[Any]],
+        # battlecards_builder removed - not needed for academic papers
         graph_builder: Callable[[list[Evidence], list[Claim]], Any],
         observability_builder: Callable[..., Any],
         average_fn: Callable[[list[float]], float],
         unique_strings_fn: Callable[[list[str | None]], list[str]],
     ) -> dict[str, Any]:
         dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-        competitors = unique_strings_fn([request.target_product, *request.competitors])
-        matrix = matrix_builder(evidence, competitors, dimensions)
+        papers = unique_strings_fn([request.target_topic])
+        matrix = matrix_builder(evidence, papers, dimensions)
         recommendations = recommendations_builder(self.ctx.run_id, request, claims, evidence, matrix)
-        battlecards = battlecards_builder(self.ctx.run_id, request, claims, matrix)
         evidence_graph = graph_builder(evidence, claims)
         observability = observability_builder(
             started_at=started_at,
@@ -1296,12 +1288,10 @@ class AnalysisAndReviewAgent(BaseAgent):
             claims=claims,
             matrix=matrix,
             recommendations=recommendations,
-            battlecards=battlecards,
         )
         return {
             "matrix": matrix,
             "recommendations": recommendations,
-            "battlecards": battlecards,
             "evidence_graph": evidence_graph,
             "observability": observability,
             "average_evidence_confidence": round(average_fn([ev.confidence for ev in evidence]), 3),
@@ -1317,13 +1307,13 @@ class AnalysisAndReviewAgent(BaseAgent):
     ) -> ResearchFeedback:
         """评估当前证据缺口，决定是否需要继续搜索以及补充什么。"""
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_product, *request.competitors]
+        entities = [request.target_topic]
 
         # 计算各维度×竞品的覆盖情况
         coverage_map: dict[tuple[str, str], int] = {}
         for ev in evidence:
-            if ev.competitor and ev.dimension:
-                key = (ev.competitor, ev.dimension)
+            if ev.paper and ev.dimension:
+                key = (ev.paper, ev.dimension)
                 coverage_map[key] = coverage_map.get(key, 0) + 1
 
         # 找出覆盖为 0 的空白格
@@ -1343,7 +1333,7 @@ class AnalysisAndReviewAgent(BaseAgent):
         high_priority_weak_cells = [
             (entity, dim)
             for entity, dim in weak_cells
-            if entity == request.target_product
+            if entity == request.target_topic
             or dim in {"positioning", "feature", "pricing", "user_voice", "enterprise"}
         ]
 
@@ -1369,13 +1359,13 @@ class AnalysisAndReviewAgent(BaseAgent):
             gaps = [
                 ResearchGap(
                     dimension=dim,
-                    competitor=entity,
+                    paper=entity,
                     reason=(
                         "本轮未采集到任何证据"
                         if (entity, dim) in empty_cells
                         else "当前只有少量证据，仍不足以支撑稳健结论"
                     ),
-                    priority="high" if entity == request.target_product else "medium",
+                    priority="high" if entity == request.target_topic else "medium",
                     suggested_queries=[
                         f"{entity} {DIMENSION_LABELS.get(dim, dim)} 评测",
                         f"{entity} {dim} official",
@@ -1409,17 +1399,15 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "【停止搜索的硬条件（设 needs_more_research=false）】\n"
                 "只有同时满足以下条件时才停止：\n"
                 f"  1. 覆盖度 ≥ {self.ctx.settings.cg_min_coverage_to_stop:.0%}\n"
-                "  2. 没有目标产品或关键维度的空白格/弱覆盖格\n"
-                "  3. 每个核心产品（目标产品 + 主要竞品）在至少 3 个维度有证据\n"
-                "  4. 若包含 user_voice 维度，必须已有来自真实用户或第三方社区的内容\n"
-                "  5. 若仍存在高优先级缺口，即使已到第 2 轮也继续建议补充搜索\n"
+                "  2. 没有关键维度的空白格/弱覆盖格\n"
+                "  3. 核心推理模式在至少 3 个维度有证据\n"
+                "  4. 若仍存在高优先级缺口，即使已到第 2 轮也继续建议补充搜索\n"
                 "\n"
                 "【缺口优先级判断】\n"
-                "  high（必须补）：目标产品在任意维度完全没有证据\n"
-                "  high（必须补）：定价维度完全没有任何产品的证据\n"
-                "  high（必须补）：目标产品或关键维度只有 1 条证据，无法交叉验证\n"
-                "  medium（建议补）：主要竞品在关键维度（定价/功能/用户声音）没有证据或证据较弱\n"
-                "  low（可选补）：次要维度或非核心竞品证据较弱\n"
+                "  high（必须补）：核心推理模式在任意维度完全没有证据\n"
+                "  high（必须补）：关键维度只有 1 条证据，无法交叉验证\n"
+                "  medium（建议补）：次要维度没有证据或证据较弱\n"
+                "  low（可选补）：非核心维度证据较弱\n"
                 "\n"
                 "【suggested_queries 要求】\n"
                 "  - 必须具体，包含产品名 + 维度关键词\n"
@@ -1432,8 +1420,8 @@ class AnalysisAndReviewAgent(BaseAgent):
                 '  "reason": "判断原因（2-3句，说明主要缺口是什么）",\n'
                 '  "gaps": [\n'
                 '    {\n'
-                '      "competitor": "产品名",\n'
-                '      "dimension": "维度英文key（如 pricing/feature/user_voice）",\n'
+                '      "paper": "论文名",\n'
+                '      "dimension": "维度英文key",\n'
                 '      "reason": "为什么这个信息现在缺失，对分析有什么影响",\n'
                 '      "priority": "high/medium/low",\n'
                 '      "suggested_queries": ["具体查询1", "具体查询2"]\n'
@@ -1442,12 +1430,12 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "}"
             ),
             user=(
-                f"目标产品：{request.target_product}  竞品：{', '.join(request.competitors)}\n"
+                f"研究方向：{request.target_topic}\n"
                 f"当前轮次：第 {loop_round} 轮  当前覆盖度：{coverage_score:.0%}\n\n"
                 f"证据覆盖矩阵（产品×维度 → 证据条数）：\n"
                 + "\n".join(
                     f"  {e} × {DIMENSION_LABELS.get(d, d)}: {coverage_map.get((e, d), 0)} 条"
-                    for e in [request.target_product, *request.competitors]
+                    for e in [request.target_topic]
                     for d in request.analysis_dimensions
                 )
                 + f"\n\n空白格（0条证据）：{len(empty_cells)} 个\n"
@@ -1463,7 +1451,7 @@ class AnalysisAndReviewAgent(BaseAgent):
             gaps = [
                 ResearchGap(
                     dimension=dim,
-                    competitor=entity,
+                    paper=entity,
                     reason=(
                         "证据为空"
                         if (entity, dim) in empty_cells
@@ -1495,7 +1483,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 priority = "medium"
             gaps.append(ResearchGap(
                 dimension=dim,
-                competitor=str(row.get("competitor") or request.target_product),
+                paper=str(row.get("paper") or request.target_topic),
                 reason=str(row.get("reason") or ""),
                 priority=priority,  # type: ignore[arg-type]
                 suggested_queries=coerce_str_list(row.get("suggested_queries"))[:4],
@@ -1674,10 +1662,10 @@ class ReportComposerAgent(BaseAgent):
     ) -> dict[str, Any]:
         matrix: CompetitorMatrix | None = artifacts.get("matrix")
         recommendations: list[OpportunityRecommendation] = artifacts.get("recommendations") or []
-        battlecards = artifacts.get("battlecards") or []
+        battlecards = []
         observability: ObservabilitySnapshot | None = artifacts.get("observability")
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_product, *request.competitors]
+        entities = [request.target_topic]
 
         def cite(evidence_ids: list[str], limit: int = 4) -> str:
             seen: list[int] = []
@@ -1698,12 +1686,12 @@ class ReportComposerAgent(BaseAgent):
         matrix_cells: list[dict[str, Any]] = []
         if matrix:
             for cell in matrix.cells:
-                if cell.dimension not in dimensions or cell.competitor not in entities:
+                if cell.dimension not in dimensions or cell.paper not in entities:
                     continue
                 matrix_cells.append(
                     {
                         "dimension": DIMENSION_LABELS.get(cell.dimension, cell.dimension),
-                        "competitor": cell.competitor,
+                        "paper": cell.paper,
                         "summary": short(cell.summary, 170),
                         "citations": cite(cell.evidence_ids, 3),
                     }
@@ -1737,12 +1725,12 @@ class ReportComposerAgent(BaseAgent):
         for item in sorted(evidence, key=evidence_score, reverse=True):
             if item.dimension not in dimensions:
                 continue
-            competitor = item.competitor or "其他"
-            if competitor not in entities:
+            paper = item.paper or "其他"
+            if paper not in entities:
                 continue
             if not citation_map.get(item.evidence_id):
                 continue
-            bucket = grouped[item.dimension][competitor]
+            bucket = grouped[item.dimension][paper]
             if len(bucket) < 2:
                 bucket.append(item)
 
@@ -1753,7 +1741,7 @@ class ReportComposerAgent(BaseAgent):
                 for item in grouped.get(dimension, {}).get(entity, []):
                     dimension_rows.append(
                         {
-                            "competitor": entity,
+                            "paper": entity,
                             "fact": short(item.fact, 220),
                             "quote": short(item.quote, 220),
                             "source_title": short(item.source_title or item.title, 110),
@@ -1773,9 +1761,9 @@ class ReportComposerAgent(BaseAgent):
         return {
             "project": {
                 "name": request.project_name,
-                "target_product": request.target_product,
+                "target_topic": request.target_topic,
                 "product_description": request.product_description,
-                "competitors": request.competitors,
+                "papers": request.seed_papers,
                 "research_goal": request.research_goal,
                 "analysis_dimensions": [DIMENSION_LABELS.get(item, item) for item in dimensions],
             },
@@ -1803,17 +1791,6 @@ class ReportComposerAgent(BaseAgent):
                 }
                 for item in recommendations[:6]
             ],
-            "battlecards": [
-                {
-                    "competitor": item.competitor,
-                    "scenario": short(item.customer_scenario, 140),
-                    "competitor_strength": short(item.competitor_strength, 160),
-                    "talk_track": short(item.talk_track, 180),
-                    "objection_handler": short(item.objection_handler, 180),
-                    "citations": cite(item.evidence_ids, 3),
-                }
-                for item in battlecards[:6]
-            ],
             "citation_instruction": "Use citation numbers exactly as provided, for example [1][3]. End the report with <<REFERENCES>> under ## 参考来源.",
         }
 
@@ -1832,12 +1809,12 @@ class ReportComposerAgent(BaseAgent):
 
         context = {
             "project": request.project_name,
-            "target_product": request.target_product,
-            "competitors": request.competitors,
+            "target_topic": request.target_topic,
+            "papers": request.seed_papers,
             "research_goal": request.research_goal,
             "metrics": metrics.model_dump(mode="json"),
             "coverage_by_dimension": matrix.coverage_by_dimension,
-            "coverage_by_competitor": matrix.coverage_by_competitor,
+            "coverage_by_paper": matrix.coverage_by_paper,
             "report_confidence": observability.report_confidence,
             "top_recommendations": [
                 item.model_dump(mode="json") for item in recommendations[:6]
@@ -1856,7 +1833,7 @@ class ReportComposerAgent(BaseAgent):
             "evidence_samples": [
                 {
                     "dimension": item.dimension_label,
-                    "competitor": item.competitor,
+                    "paper": item.paper,
                     "fact": item.fact,
                     "source_type": item.source_type,
                     "confidence": item.confidence,
@@ -1897,8 +1874,8 @@ class ReportComposerAgent(BaseAgent):
 
         context = {
             "project": request.project_name,
-            "target_product": request.target_product,
-            "competitors": request.competitors,
+            "target_topic": request.target_topic,
+            "papers": request.seed_papers,
             "analysis_dimensions": [
                 DIMENSION_LABELS.get(item, item) for item in request.analysis_dimensions
             ],
@@ -1906,7 +1883,7 @@ class ReportComposerAgent(BaseAgent):
             "metrics": metrics.model_dump(mode="json"),
             "source_mix": observability.source_mix,
             "dimension_coverage": observability.dimension_coverage,
-            "competitor_coverage": observability.competitor_coverage,
+            "paper_coverage": observability.paper_coverage,
             "quality_gates": [
                 gate.model_dump(mode="json") for gate in observability.quality_gates
             ],
@@ -1918,7 +1895,7 @@ class ReportComposerAgent(BaseAgent):
             },
             "matrix_coverage": {
                 "by_dimension": matrix.coverage_by_dimension,
-                "by_competitor": matrix.coverage_by_competitor,
+                "by_paper": matrix.coverage_by_paper,
             },
             "evidence_profile": {
                 "total": len(evidence),
@@ -1958,27 +1935,27 @@ class ReportComposerAgent(BaseAgent):
 
 def estimate_coverage(
     candidates: list[SourceCandidate],
-    competitors: list[str],
+    papers: list[str],
     dimensions: list[str],
 ) -> float:
-    """快速估算当前来源对 竞品×维度 矩阵的覆盖比例。"""
-    if not competitors or not dimensions:
+    """快速估算当前来源对 论文×维度 矩阵的覆盖比例。"""
+    if not papers or not dimensions:
         return 0.0
     covered: set[tuple[str, str]] = set()
     for c in candidates:
         text = f"{c.url} {c.title} {c.snippet}".lower()
-        for entity in competitors:
+        for entity in papers:
             if entity.lower() in text:
                 for dim in dimensions:
                     kws = dimension_search_keywords(dim)
                     if any(kw.lower() in text for kw in kws):
                         covered.add((entity, dim))
-    total = len(competitors) * len(dimensions)
+    total = len(papers) * len(dimensions)
     return round(len(covered) / total, 3) if total else 0.0
 
 
 def deterministic_plan(request: ResearchRequest) -> ResearchPlan:
-    entities = [request.target_product, *request.competitors]
+    entities = [request.target_topic]
     dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
     queries: list[str] = []
     source_tasks: list[SourceTask] = []
@@ -1995,7 +1972,7 @@ def deterministic_plan(request: ResearchRequest) -> ResearchPlan:
     queries = [task.query for task in source_tasks]
     return ResearchPlan(
         research_goal=request.research_goal,
-        competitors=request.competitors,
+        papers=request.seed_papers,
         dimensions=dimensions,
         queries=queries[:18],
         source_tasks=source_tasks[:18],
@@ -2046,7 +2023,7 @@ def build_gap_source_tasks(
     domain_counts = Counter(domain for domain in domains if domain)
     dominant_share = max(domain_counts.values(), default=0) / max(1, len(deduped))
     dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-    entities = [request.target_product, *request.competitors]
+    entities = [request.target_topic]
     covered_pairs = infer_candidate_pairs(deduped, planned_tasks, entities, dimensions)
 
     gap_tasks: list[SourceTask] = []
