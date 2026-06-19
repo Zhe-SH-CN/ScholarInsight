@@ -54,17 +54,36 @@ if __name__ == "__main__":
                 pdfs.append(os.path.join(root, f))
     pdfs.sort()
 
-    print(f"Processing {len(pdfs)} PDFs from {pdf_dir}...")
+    # 断点续传：加载已有结果，跳过已处理的 PDF
+    existing = {}
+    if os.path.exists(output_path):
+        with open(output_path, "r") as f:
+            old_results = json.load(f)
+        for r in old_results:
+            existing[r.get("pdf_path", "")] = r
+        print(f"Loaded {len(existing)} existing entries for resume")
 
-    results = []
-    for i, pdf in enumerate(pdfs):
+    # 只处理新增的 PDF
+    new_pdfs = [p for p in pdfs if p not in existing]
+    print(f"Total PDFs: {len(pdfs)}, already processed: {len(existing)}, new: {len(new_pdfs)}")
+
+    if not new_pdfs:
+        print("No new PDFs to process. Done!")
+        sys.exit(0)
+
+    # 处理新增 PDF
+    new_results = []
+    for i, pdf in enumerate(new_pdfs):
         if (i + 1) % 500 == 0:
-            print(f"  {i+1}/{len(pdfs)}...")
-        results.append(extract_metadata(pdf))
+            print(f"  {i+1}/{len(new_pdfs)} new PDFs...")
+        new_results.append(extract_metadata(pdf))
+
+    # 合并：旧结果 + 新结果（旧的保留，新的追加）
+    all_results = list(existing.values()) + new_results
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     with open(output_path, "w") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
+        json.dump(all_results, f, ensure_ascii=False, indent=2)
 
-    ok = sum(1 for r in results if "error" not in r)
-    print(f"Done: {ok}/{len(results)} successful, saved to {output_path}")
+    ok = sum(1 for r in all_results if "error" not in r)
+    print(f"Done: {ok}/{len(all_results)} successful, saved to {output_path}")
