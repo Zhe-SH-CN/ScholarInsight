@@ -151,6 +151,21 @@ class ResearchPipeline:
         self.search = LocalPaperSearchTool(self.settings)
         self.fetcher = Fetcher(self.settings)
         self.llm = LLMClient(self.settings)
+        # Gemini 红队 LLM（独立配置）
+        self._gemini_llm: LLMClient | None = None
+
+    @property
+    def gemini_llm(self) -> LLMClient:
+        """Gemini LLM for red-team review (lazy init)."""
+        if self._gemini_llm is None:
+            gemini_settings = Settings(
+                cg_llm_provider="gemini",
+                cg_llm_model=self.settings.gemini_model,
+                gemini_api_key=self.settings.gemini_api_key,
+                gemini_base_url=self.settings.gemini_base_url,
+            )
+            self._gemini_llm = LLMClient(gemini_settings)
+        return self._gemini_llm
 
     async def prepare_run(self, request: ResearchRequest, owner: str | None = None) -> RunStatus:
         return await self.runs.create(request, owner=owner)
@@ -865,7 +880,17 @@ class ResearchPipeline:
     async def red_team(
         self, run_id: str, claims: list[Claim], evidence: list[Evidence]
     ) -> list[Claim]:
-        reviewed = await AnalysisAndReviewAgent(self.agent_context(run_id)).review(claims, evidence)
+        # 红队使用 Gemini（模型多样性）
+        gemini_ctx = AgentContext(
+            run_id=run_id,
+            run_dir=self.runs.run_dir(run_id),
+            settings=self.settings,
+            llm=self.gemini_llm,
+            trace=lambda node, phase, status, message, payload=None: self.trace(
+                run_id, node, phase, status, message, payload
+            ),
+        )
+        reviewed = await AnalysisAndReviewAgent(gemini_ctx).review(claims, evidence)
         run_dir = self.runs.run_dir(run_id)
         for claim in reviewed:
             await atomic_write_json(run_dir / "claims" / f"{claim.claim_id}.json", claim)

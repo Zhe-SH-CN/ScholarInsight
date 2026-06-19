@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     # --- LLM ---
     mimo_api_key: str = ""
     mimo_base_url: str = "https://token-plan-cn.xiaomimimo.com/v1"
+    gemini_api_key: str = ""
+    gemini_base_url: str = ""
+    gemini_model: str = "gemini-pro-agent"
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     qwen_api_key: str = ""
@@ -131,6 +134,7 @@ class Settings(BaseSettings):
             "deepseek": self.deepseek_api_key,
             "qwen": self.qwen_api_key,
             "mimo": self.mimo_api_key,
+            "gemini": self.gemini_api_key,
         }
         key = provider_keys.get(provider, self.deepseek_api_key)
         key = key.strip()
@@ -146,6 +150,7 @@ class Settings(BaseSettings):
             "deepseek": self.deepseek_base_url,
             "qwen": self.qwen_base_url,
             "mimo": self.mimo_base_url,
+            "gemini": self.gemini_base_url,
         }
         return provider_base_urls.get(provider, self.deepseek_base_url)
 
