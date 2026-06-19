@@ -26,8 +26,8 @@ quality_metrics:
   matrix_coverage: known_cells / total_cells
   evidence_confidence_mean: average Evidence confidence
 failure_modes:
-  - Claim overgeneralizes from a single official page.
-  - User review source is treated as representative market evidence.
+  - Claim overgeneralizes from a single paper.
+  - Abstract-only evidence is treated as full experimental support.
   - Recommendation is not tied back to Claim or Evidence.
 skills:
   - id: skill.claim_generation.v1
@@ -43,7 +43,7 @@ skills:
       claims: Claim[]
     acceptance:
       - Each Claim cites at least one existing evidence_id.
-      - Claim states evidence scope and avoids universal market claims.
+      - Claim states evidence scope and avoids universal academic claims.
       - confidence is lower when source diversity is weak.
   - id: skill.red_team_review.v1
     purpose: Challenge Claims for evidence sufficiency and wording risk.

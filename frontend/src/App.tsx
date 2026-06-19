@@ -67,9 +67,9 @@ function clampArtifactPaneWidth(width: number, viewportWidth = window.innerWidth
 
 interface ResearchRequest {
   project_name: string;
-  target_product: string;
-  product_description: string;
-  competitors: string[];
+  target_topic: string;
+  topic_description: string;
+  seed_papers: string[];
   analysis_dimensions: string[];
   research_goal: string;
   seed_urls: string[] | string;
@@ -77,6 +77,7 @@ interface ResearchRequest {
   max_sources_per_query: number;
   auto_discover_sources: boolean;
   max_search_rounds: number;
+  max_research_loops?: number;
 }
 
 interface RunMetrics {
@@ -89,7 +90,6 @@ interface RunMetrics {
   challenged_claim_count: number;
   matrix_cell_count?: number;
   recommendation_count?: number;
-  battlecard_count?: number;
   average_evidence_confidence?: number;
   coverage_score?: number;
 }
@@ -97,7 +97,7 @@ interface RunMetrics {
 interface RunStatus {
   run_id: string;
   project_name: string;
-  target_product: string;
+  target_topic: string;
   status: RunStatusName;
   current_stage: string;
   started_at: string;
@@ -124,7 +124,7 @@ interface EvidenceSummary {
   evidence_id: string;
   dimension: string;
   dimension_label: string;
-  competitor?: string | null;
+  paper?: string | null;
   fact: string;
   quote_preview: string;
   source_title: string;
@@ -132,6 +132,9 @@ interface EvidenceSummary {
   source_type: string;
   confidence: number;
   fetched_at: string;
+  reasoning_pattern?: string;
+  bottleneck?: string;
+  mechanism?: string;
 }
 
 interface Claim {
@@ -176,7 +179,7 @@ interface SourceTask {
 
 interface ResearchPlan {
   research_goal: string;
-  competitors: string[];
+  papers: string[];
   dimensions: string[];
   queries: string[];
   source_tasks: SourceTask[];
@@ -187,7 +190,7 @@ interface ResearchPlan {
 }
 
 interface MatrixCell {
-  competitor: string;
+  paper: string;
   dimension: string;
   dimension_label: string;
   summary: string;
@@ -196,12 +199,12 @@ interface MatrixCell {
   status: "strong" | "partial" | "weak" | "unknown";
 }
 
-interface CompetitorMatrix {
-  competitors: string[];
+interface PaperPatternMatrix {
+  papers: string[];
   dimensions: string[];
   dimension_labels: Record<string, string>;
   cells: MatrixCell[];
-  coverage_by_competitor: Record<string, number>;
+  coverage_by_paper: Record<string, number>;
 }
 
 interface OpportunityRecommendation {
@@ -216,23 +219,13 @@ interface OpportunityRecommendation {
   confidence: number;
 }
 
-interface BattlecardItem {
-  item_id: string;
-  competitor: string;
-  customer_scenario: string;
-  competitor_strength: string;
-  our_response: string;
-  talk_track: string;
-  confidence: number;
-}
-
 interface ObservabilitySnapshot {
   total_duration_seconds: number;
   evidence_coverage_score: number;
   claim_pass_rate: number;
   report_confidence: number;
   dimension_coverage: Record<string, number>;
-  competitor_coverage: Record<string, number>;
+  paper_coverage: Record<string, number>;
 }
 
 interface RunDetail {
@@ -243,9 +236,8 @@ interface RunDetail {
   evidence: EvidenceSummary[];
   claims: Claim[];
   trace: TraceEvent[];
-  matrix?: CompetitorMatrix | null;
+  matrix?: PaperPatternMatrix | null;
   recommendations?: OpportunityRecommendation[];
-  battlecards?: BattlecardItem[];
   observability?: ObservabilitySnapshot | null;
   report_markdown: string;
   executive_summary_markdown?: string | null;
@@ -269,14 +261,15 @@ interface SessionState {
 interface DraftState {
   projectName: string;
   target: string;
-  productDescription: string;
-  competitors: string;
+  topicDescription: string;
+  seedPapers: string;
   goal: string;
   seedUrls: string;
   dimensions: string[];
   maxSources: number;
   maxSourcesPerQuery: number;
   maxSearchRounds: number;
+  maxResearchLoops: number;
   showAdvanced: boolean;
 }
 
@@ -309,12 +302,21 @@ const AGENT_META: Record<string, AgentMeta> = {
 };
 
 const dimensionOptions = [
-  { label: "定位", value: "positioning" },
-  { label: "功能", value: "feature" },
-  { label: "定价", value: "pricing" },
-  { label: "口碑", value: "user_voice" },
-  { label: "企业", value: "enterprise" },
-  { label: "战略", value: "strategy" },
+  { label: "痛点驱动重构", value: "gap_driven_reframing" },
+  { label: "跨领域综合", value: "cross_domain_synthesis" },
+  { label: "表征转换", value: "representation_shift" },
+  { label: "模块化管线", value: "modular_pipeline_composition" },
+  { label: "数据评估工程", value: "data_evaluation_engineering" },
+  { label: "概率建模", value: "principled_probabilistic_modeling" },
+  { label: "理论实验迭代", value: "formal_experimental_tightening" },
+  { label: "近似工程", value: "approximation_engineering" },
+  { label: "推理时控制", value: "inference_time_control" },
+  { label: "结构归纳偏置", value: "structural_inductive_bias" },
+  { label: "多尺度分层", value: "multiscale_hierarchical_modeling" },
+  { label: "机制分解", value: "mechanistic_decomposition" },
+  { label: "对抗建模", value: "adversary_modeling" },
+  { label: "数值系统协同", value: "numerics_systems_codesign" },
+  { label: "数据中心优化", value: "data_centric_optimization" },
 ];
 
 const viewOptions: Array<{ key: FocusView; label: string; icon: typeof Sparkles }> = [
@@ -457,10 +459,10 @@ export default function App() {
     setSubmitting(true);
     try {
       const payload: ResearchRequest = {
-        project_name: draft.projectName.trim() || "Competitive Research",
-        target_product: draft.target.trim() || "Trae",
-        product_description: draft.productDescription.trim(),
-        competitors: normalizeList(draft.competitors),
+        project_name: draft.projectName.trim() || "ScholarInsight Research",
+        target_topic: draft.target.trim() || "Retrieval-Augmented Generation",
+        topic_description: draft.topicDescription.trim(),
+        seed_papers: normalizeList(draft.seedPapers),
         analysis_dimensions: draft.dimensions,
         research_goal: draft.goal.trim(),
         seed_urls: normalizeLines(draft.seedUrls),
@@ -468,6 +470,7 @@ export default function App() {
         max_sources_per_query: draft.maxSourcesPerQuery,
         auto_discover_sources: true,
         max_search_rounds: draft.maxSearchRounds,
+        max_research_loops: draft.maxResearchLoops,
       };
       const r = await axios.post<{ run_id: string }>("/api/runs", payload);
       setActiveRunId(r.data.run_id);
@@ -583,7 +586,7 @@ export default function App() {
         </button>
 
         <div className="brand-copy">
-          <strong>CompeteInsight</strong>
+          <strong>ScholarInsight</strong>
           <span>Research OS · {session.username}</span>
         </div>
 
@@ -625,8 +628,8 @@ export default function App() {
       <section className="conversation-pane">
         <header className="top-strip">
           <div>
-            <span className="eyebrow">Deep research workspace</span>
-            <h1>{activeStatus?.project_name ?? "Ask for a market map"}</h1>
+            <span className="eyebrow">Paper reasoning workspace</span>
+            <h1>{activeStatus?.project_name ?? "Analyze a research direction"}</h1>
           </div>
           <div className="top-actions">
             {activeStatus && (activeStatus.status === "running" || activeStatus.status === "queued") && (
@@ -646,9 +649,9 @@ export default function App() {
         <div className="thread-scroll landing-scroll">
           <section className="hero-composer">
             <div className="hero-copy">
-              <span className="spark-chip"><Sparkles size={14} /> Evidence-first intelligence</span>
-              <h2>Turn a rough competitor question into a source-backed research brief.</h2>
-              <p>CompeteInsight plans the search, collects public sources, extracts evidence, challenges claims, and keeps every artifact auditable.</p>
+              <span className="spark-chip"><Sparkles size={14} /> Evidence-first scholarship</span>
+              <h2>Turn a research direction into a cited reasoning-pattern report.</h2>
+              <p>ScholarInsight searches the local paper library, extracts innovation evidence, challenges claims, and keeps every artifact auditable.</p>
             </div>
             <IntroCarousel />
             <HeroResourceStrip />
@@ -688,7 +691,7 @@ export default function App() {
         <div className="artifact-head">
           <div>
             <span className="eyebrow">Artifacts</span>
-            <strong>{activeStatus?.target_product ?? "No active run"}</strong>
+            <strong>{activeStatus?.target_topic ?? "No active run"}</strong>
           </div>
           <PanelRightOpen size={18} />
         </div>
@@ -770,11 +773,11 @@ function LoginPage({ onLogin }: { onLogin: (username: string, password: string) 
 
   return (
     <main className="login-shell">
-      <section className="login-showcase" aria-label="CompeteInsight overview">
+      <section className="login-showcase" aria-label="ScholarInsight overview">
         <div className="login-copy">
-          <span className="spark-chip"><Sparkles size={14} /> Evidence-first intelligence</span>
-          <h1>CompeteInsight</h1>
-          <p>Turn rough competitor questions into source-backed research briefs, auditable claims, and follow-up analysis.</p>
+          <span className="spark-chip"><Sparkles size={14} /> Evidence-first scholarship</span>
+          <h1>ScholarInsight</h1>
+          <p>Turn research directions into source-backed paper reasoning reports, auditable claims, and follow-up analysis.</p>
         </div>
         <IntroCarousel variant="login" />
       </section>
@@ -787,7 +790,7 @@ function LoginPage({ onLogin }: { onLogin: (username: string, password: string) 
           <div>
             <span className="eyebrow">Private demo access</span>
             <h2>Sign in to the research workspace</h2>
-            <p>Runs and reports stay isolated under your session on the CompeteInsight server.</p>
+            <p>Runs and reports stay isolated under your session on the ScholarInsight server.</p>
           </div>
 
           <form className="login-form" onSubmit={(e) => void submit(e)}>
@@ -829,17 +832,17 @@ const introSlides: [
   {
     src: "/intro.png",
     title: "Launch Research",
-    caption: "输入目标产品、竞品和研究目标，一次启动完整的竞品研究链路。",
+    caption: "输入研究方向、种子论文和研究目标，一次启动完整的论文推理模式分析链路。",
   },
   {
     src: "/intro1.png",
-    title: "Search",
-    caption: "批量 Query 快速获取公开信息，再由 Search LLM 针对缺口补充来源。",
+    title: "Paper Search",
+    caption: "批量 Query 检索本地论文库，再针对低覆盖推理模式补充候选论文。",
   },
   {
     src: "/intro2.png",
     title: "Evidence",
-    caption: "从已采集正文中抽取可追溯事实，保留来源、原文片段和置信度。",
+    caption: "从论文正文中抽取 reasoning pattern、bottleneck、mechanism 与原文片段。",
   },
   {
     src: "/intro3.png",
@@ -849,11 +852,11 @@ const introSlides: [
   {
     src: "/intro4.png",
     title: "Report",
-    caption: "生成带引用的竞品报告、矩阵和方法说明，方便直接审阅和导出。",
+    caption: "生成带引用的论文演化报告、推理模式矩阵和方法说明。",
   },
   {
     src: "/intro5.png",
-    title: "AI Analysis Assistant",
+    title: "AI Research Assistant",
     caption: "基于本次 research 的证据和报告继续追问，快速定位关键结论。",
   },
 ];
@@ -909,9 +912,9 @@ function IntroCarousel({ variant = "landing" }: { variant?: "landing" | "login" 
 function HeroResourceStrip() {
   return (
     <div className="hero-resource-strip" aria-label="Project resources">
-      <span>Explore the project, watch a demo.</span>
+      <span>Explore the project and generated reports.</span>
       <div>
-        <a href="https://github.com/SHYTHU49/CompeteInsight" target="_blank" rel="noreferrer">
+        <a href="https://github.com/SHYTHU49/ScholarInsight" target="_blank" rel="noreferrer">
           <Github size={15} />
           GitHub
         </a>
@@ -998,7 +1001,7 @@ function RunRow({ run, active, onSelect, onDelete, onRename }: {
         ) : (
           <strong>{run.project_name}</strong>
         )}
-        <small>{run.target_product} · {formatShortDate(run.started_at)}</small>
+        <small>{run.target_topic} · {formatShortDate(run.started_at)}</small>
       </span>
       <button
         className="run-row-icon run-row-edit-button"
@@ -1040,9 +1043,9 @@ function RunHeader({ status, detail }: { status: RunStatus; detail: RunDetail | 
         <span className="run-header-title">{status.project_name}</span>
       </div>
       <div className="run-header-info">
-        <span className="rh-target">{status.target_product}</span>
-        {detail?.request.competitors.length ? (
-          <span className="rh-vs">vs {detail.request.competitors.join(" · ")}</span>
+        <span className="rh-target">{status.target_topic}</span>
+        {detail?.request.seed_papers.length ? (
+          <span className="rh-vs">seed papers: {detail.request.seed_papers.join(" · ")}</span>
         ) : null}
       </div>
       {detail?.request.research_goal && (
@@ -1400,70 +1403,32 @@ function getNodeStats(status: RunStatus, stage: string, plan?: ResearchPlan | nu
 function ResearchComposer({ draft, setDraft, submitting, onSubmit }: {
   draft: DraftState; setDraft: (v: DraftState) => void; submitting: boolean; onSubmit: () => void;
 }) {
-  const [suggesting, setSuggesting] = useState(false);
-  const [suggestedChips, setSuggestedChips] = useState<Array<{ name: string; reason: string }>>([]);
-  const [suggestError, setSuggestError] = useState("");
-
-  async function suggestCompetitors() {
-    if (!draft.target.trim()) return;
-    setSuggesting(true);
-    setSuggestError("");
-    try {
-      const r = await axios.post<{ competitors: Array<{ name: string; reason: string }>; llm_configured: boolean }>(
-        "/api/suggest_competitors",
-        { product_name: draft.target.trim(), product_description: draft.productDescription.trim() },
-      );
-      if (!r.data.llm_configured) {
-        setSuggestError("LLM 未配置，使用规则推荐（配置 API Key 可获得更精准建议）");
-      }
-      setSuggestedChips(r.data.competitors);
-    } catch {
-      setSuggestError("推荐失败，请手动填写竞品");
-    } finally {
-      setSuggesting(false);
-    }
-  }
-
-  function adoptSuggestion(name: string) {
-    const existing = normalizeList(draft.competitors);
-    if (!existing.includes(name)) {
-      setDraft({ ...draft, competitors: [...existing, name].join(", ") });
-    }
-  }
-
-  function removeSuggestion(name: string) {
-    const updated = normalizeList(draft.competitors).filter((c) => c !== name);
-    setDraft({ ...draft, competitors: updated.join(", ") });
-  }
-
-  const currentCompetitors = normalizeList(draft.competitors);
-
   return (
     <div className="composer-card">
       <textarea
         className="composer-textarea"
         value={draft.goal}
         onChange={(e) => setDraft({ ...draft, goal: e.target.value })}
-        placeholder="研究目标：例如「对比 Trae 与 Cursor、GitHub Copilot、Windsurf 在定价、功能和企业化方面的差异」"
+        placeholder="研究目标：例如「分析 RAG 与知识图谱结合方向中论文如何通过跨领域综合、表征转换和推理时控制解决瓶颈」"
         rows={3}
       />
 
       {/* Target + Description row */}
       <div className="composer-target-row">
         <label className="composer-label-block">
-          <span>目标产品</span>
+          <span>研究方向</span>
           <input
             value={draft.target}
             onChange={(e) => setDraft({ ...draft, target: e.target.value })}
-            placeholder="Trae"
+            placeholder="Retrieval-Augmented Generation"
           />
         </label>
         <label className="composer-label-block composer-desc-label">
-          <span>产品描述（帮助识别同名产品）</span>
+          <span>方向描述（可选）</span>
           <input
-            value={draft.productDescription}
-            onChange={(e) => setDraft({ ...draft, productDescription: e.target.value })}
-            placeholder="一个 AI 编程助手 / AI coding tool"
+            value={draft.topicDescription}
+            onChange={(e) => setDraft({ ...draft, topicDescription: e.target.value })}
+            placeholder="例如：面向知识密集型问答、多跳推理或科学文献检索"
           />
         </label>
         <label className="composer-label-block composer-name-label">
@@ -1471,52 +1436,22 @@ function ResearchComposer({ draft, setDraft, submitting, onSubmit }: {
           <input
             value={draft.projectName}
             onChange={(e) => setDraft({ ...draft, projectName: e.target.value })}
-            placeholder="AI coding assistant landscape"
+            placeholder="RAG reasoning pattern analysis"
           />
         </label>
       </div>
 
-      {/* Competitors row */}
-      <div className="composer-competitors-section">
-        <div className="composer-competitors-header">
-          <span className="composer-field-label">竞品（逗号分隔）</span>
-          <button
-            className={`suggest-btn ${suggesting ? "loading" : ""}`}
-            type="button"
-            onClick={() => void suggestCompetitors()}
-            disabled={suggesting || !draft.target.trim()}
-          >
-            {suggesting ? <Loader2 size={13} className="spin" /> : <Sparkles size={13} />}
-            {suggesting ? "推荐中…" : "推荐竞品"}
-          </button>
+      {/* Seed papers row */}
+      <div className="composer-seed-section">
+        <div className="composer-seed-header">
+          <span className="composer-field-label">种子论文（逗号分隔，可选）</span>
         </div>
         <input
-          className="competitors-input"
-          value={draft.competitors}
-          onChange={(e) => setDraft({ ...draft, competitors: e.target.value })}
-          placeholder="Cursor, GitHub Copilot, Windsurf"
+          className="seed-papers-input"
+          value={draft.seedPapers}
+          onChange={(e) => setDraft({ ...draft, seedPapers: e.target.value })}
+          placeholder="Self-RAG, GraphRAG, RETRO"
         />
-        {suggestError && <p className="suggest-error">{suggestError}</p>}
-        {suggestedChips.length > 0 && (
-          <div className="suggested-chips">
-            <span className="chips-label">推荐竞品：</span>
-            {suggestedChips.map((c) => {
-              const adopted = currentCompetitors.includes(c.name);
-              return (
-                <button
-                  key={c.name}
-                  className={`suggest-chip ${adopted ? "adopted" : ""}`}
-                  type="button"
-                  title={c.reason}
-                  onClick={() => adopted ? removeSuggestion(c.name) : adoptSuggestion(c.name)}
-                >
-                  {adopted ? <CheckCircle2 size={12} /> : <Plus size={12} />}
-                  {c.name}
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* Dimension tags */}
@@ -1564,17 +1499,21 @@ function ResearchComposer({ draft, setDraft, submitting, onSubmit }: {
               <span>搜索最大轮次（1-5）</span>
               <input type="number" min={1} max={5} value={draft.maxSearchRounds} onChange={(e) => setDraft({ ...draft, maxSearchRounds: Number(e.target.value) || 3 })} />
             </label>
+            <label>
+              <span>研究循环轮次（1-8）</span>
+              <input type="number" min={1} max={8} value={draft.maxResearchLoops} onChange={(e) => setDraft({ ...draft, maxResearchLoops: Number(e.target.value) || 4 })} />
+            </label>
           </div>
           <label>
-            <span>种子 URL（每行一个，优先抓取）</span>
-            <textarea rows={3} value={draft.seedUrls} onChange={(e) => setDraft({ ...draft, seedUrls: e.target.value })} placeholder="https://example.com/pricing" />
+            <span>种子 URL / 本地路径（每行一个，优先采集）</span>
+            <textarea rows={3} value={draft.seedUrls} onChange={(e) => setDraft({ ...draft, seedUrls: e.target.value })} placeholder="/home/zsz/papers/xxx.pdf" />
           </label>
         </div>
       )}
 
       <div className="composer-footer">
         <span className="composer-hint-text">
-          {draft.dimensions.length} 维度 · 最多 {draft.maxSources} 来源 · {draft.maxSearchRounds} 轮搜索
+          {draft.dimensions.length} 模式 · 最多 {draft.maxSources} 来源 · {draft.maxSearchRounds} 轮搜索
         </span>
         <button className="launch-button" onClick={onSubmit} disabled={submitting || !draft.goal.trim()}>
           {submitting ? <Loader2 size={16} className="spin" /> : <ArrowUp size={16} />}
@@ -1616,15 +1555,15 @@ function BriefView({ detail }: { detail: RunDetail }) {
       {/* Scrollable content */}
       <div className="brief-scroll">
         <div className="brief-hero">
-          <span className="brief-tag">{detail.request.target_product}</span>
+          <span className="brief-tag">{detail.request.target_topic}</span>
           <p className="brief-goal">{detail.request.research_goal}</p>
         </div>
 
-        {detail.request.competitors.length > 0 && (
+        {detail.request.seed_papers.length > 0 && (
           <div className="artifact-section">
-            <div className="section-label">Competitors</div>
+            <div className="section-label">Seed papers</div>
             <div className="chip-cloud">
-              {detail.request.competitors.map((c) => <span key={c} className="chip">{c}</span>)}
+              {detail.request.seed_papers.map((c) => <span key={c} className="chip">{c}</span>)}
             </div>
           </div>
         )}
@@ -1656,7 +1595,7 @@ function BriefView({ detail }: { detail: RunDetail }) {
 
         {detail.request.analysis_dimensions.length > 0 && (
           <div className="artifact-section">
-            <div className="section-label">Analysis dimensions</div>
+            <div className="section-label">Reasoning patterns</div>
             <div className="chip-cloud">
               {detail.request.analysis_dimensions.map((d) => (
                 <span key={d} className="chip dim-chip">{dimensionLabel(d)}</span>
@@ -1667,23 +1606,23 @@ function BriefView({ detail }: { detail: RunDetail }) {
 
         {detail.matrix && detail.matrix.cells.length > 0 && (
           <div className="artifact-section">
-            <div className="section-label">Competitive matrix · {detail.matrix.cells.length} cells</div>
+            <div className="section-label">Paper-pattern matrix · {detail.matrix.cells.length} cells</div>
             <div className="matrix-preview">
               <table>
                 <thead>
                   <tr>
                     <th />
-                    {detail.matrix.competitors.slice(0, 4).map((c) => <th key={c}>{c}</th>)}
+                    {detail.matrix.papers.slice(0, 4).map((c) => <th key={c}>{c}</th>)}
                   </tr>
                 </thead>
                 <tbody>
                   {detail.matrix.dimensions.slice(0, 5).map((dim) => (
                     <tr key={dim}>
                       <td className="matrix-dim">{detail.matrix!.dimension_labels[dim] ?? dim}</td>
-                      {detail.matrix!.competitors.slice(0, 4).map((comp) => {
-                        const cell = detail.matrix!.cells.find((c) => c.competitor === comp && c.dimension === dim);
+                      {detail.matrix!.papers.slice(0, 4).map((paper) => {
+                        const cell = detail.matrix!.cells.find((c) => c.paper === paper && c.dimension === dim);
                         return (
-                          <td key={comp} className={`matrix-cell ${cell?.status ?? "unknown"}`} title={cell?.summary}>
+                          <td key={paper} className={`matrix-cell ${cell?.status ?? "unknown"}`} title={cell?.summary}>
                             {cellIcon(cell?.status)}
                           </td>
                         );
@@ -1752,7 +1691,7 @@ function ChatPanel({ runId, disabled }: { runId: string; disabled?: boolean }) {
     }
   }
 
-  const suggestions = ["Key differentiators?", "Pricing comparison summary", "Main risks identified", "Opportunity gaps?"];
+  const suggestions = ["Dominant reasoning patterns?", "Key paper mechanisms?", "Main evidence gaps?", "Follow-up research directions?"];
 
   return (
     <div className={`chat-panel${disabled ? " chat-panel-disabled" : ""}`}>
@@ -1864,10 +1803,17 @@ function EvidenceView({ evidence }: { evidence: EvidenceSummary[] }) {
         <article className="evidence-item" key={item.evidence_id}>
           <div className="evidence-item-top">
             <span className="dim-badge">{item.dimension_label}</span>
-            {item.competitor && <span className="competitor-badge">{item.competitor}</span>}
+            {item.paper && <span className="paper-badge">{item.paper}</span>}
             <ConfidenceBar value={item.confidence} />
           </div>
           <strong>{item.fact}</strong>
+          {(item.bottleneck || item.mechanism || item.reasoning_pattern) && (
+            <div className="evidence-pattern-meta">
+              {item.reasoning_pattern && <span>{dimensionLabel(item.reasoning_pattern)}</span>}
+              {item.bottleneck && <span>瓶颈：{item.bottleneck}</span>}
+              {item.mechanism && <span>机制：{item.mechanism}</span>}
+            </div>
+          )}
           <ExpandableText as="blockquote" className="evidence-quote" text={item.quote_preview} limit={220} quoted />
           <a href={item.source_url} target="_blank" rel="noreferrer" className="evidence-source">
             <Globe2 size={12} />
@@ -1977,7 +1923,7 @@ function ReportView({ detail }: { detail: RunDetail }) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `${detail.request.target_product}_${tab}.md`;
+    a.download = `${detail.request.target_topic}_${tab}.md`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -2192,16 +2138,26 @@ function RiskTag({ risk }: { risk: Claim["risk_level"] }) {
 
 function defaultDraft(): DraftState {
   return {
-    projectName: "AI coding assistant landscape",
-    target: "Trae",
-    productDescription: "一个 AI 编程助手 / AI coding tool",
-    competitors: "Cursor, GitHub Copilot, Windsurf",
-    goal: "Analyze public evidence for Trae against Cursor, GitHub Copilot, and Windsurf. Produce positioning, pricing, enterprise readiness, user voice, opportunity points, and sales battlecards.",
+    projectName: "RAG reasoning pattern analysis",
+    target: "Retrieval-Augmented Generation",
+    topicDescription: "Knowledge-intensive QA, multi-hop reasoning, and paper-grounded generation",
+    seedPapers: "Self-RAG, GraphRAG, RETRO",
+    goal: "Analyze how papers in Retrieval-Augmented Generation use reasoning patterns such as cross-domain synthesis, representation shift, data evaluation engineering, and inference-time control.",
     seedUrls: "",
-    dimensions: ["positioning", "feature", "pricing", "user_voice", "enterprise", "strategy"],
+    dimensions: [
+      "gap_driven_reframing",
+      "cross_domain_synthesis",
+      "representation_shift",
+      "modular_pipeline_composition",
+      "data_evaluation_engineering",
+      "inference_time_control",
+      "mechanistic_decomposition",
+      "data_centric_optimization",
+    ],
     maxSources: 150,
     maxSourcesPerQuery: 3,
     maxSearchRounds: 3,
+    maxResearchLoops: 4,
     showAdvanced: false,
   };
 }
@@ -2282,8 +2238,21 @@ function formatTraceMessage(event: TraceEvent): string {
 
 function dimensionLabel(dim: string): string {
   const map: Record<string, string> = {
-    positioning: "定位", feature: "功能", pricing: "定价",
-    user_voice: "口碑", enterprise: "企业", strategy: "战略",
+    gap_driven_reframing: "痛点驱动重构",
+    cross_domain_synthesis: "跨领域综合",
+    representation_shift: "表征转换",
+    modular_pipeline_composition: "模块化管线",
+    data_evaluation_engineering: "数据评估工程",
+    principled_probabilistic_modeling: "概率建模",
+    formal_experimental_tightening: "理论实验迭代",
+    approximation_engineering: "近似工程",
+    inference_time_control: "推理时控制",
+    structural_inductive_bias: "结构归纳偏置",
+    multiscale_hierarchical_modeling: "多尺度分层",
+    mechanistic_decomposition: "机制分解",
+    adversary_modeling: "对抗建模",
+    numerics_systems_codesign: "数值系统协同",
+    data_centric_optimization: "数据中心优化",
   };
   return map[dim] ?? dim;
 }

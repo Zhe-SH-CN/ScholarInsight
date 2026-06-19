@@ -27,6 +27,20 @@ class EvidenceRepository:
     async def list_summary(self) -> list[EvidenceSummary]:
         return [EvidenceSummary(**row) for row in await read_jsonl(self.index)]
 
+    async def load_all(self) -> list[Evidence]:
+        """Load all Evidence objects from individual JSON files."""
+        evidence_list: list[Evidence] = []
+        if not self.dir.exists():
+            return evidence_list
+        for path in sorted(self.dir.glob("ev_*.json")):
+            try:
+                data = await read_json(path)
+                if data:
+                    evidence_list.append(Evidence(**data))
+            except Exception:
+                pass
+        return evidence_list
+
     @staticmethod
     def summary(evidence: Evidence) -> EvidenceSummary:
         return EvidenceSummary(
@@ -41,5 +55,7 @@ class EvidenceRepository:
             source_type=evidence.source_type,
             confidence=evidence.confidence,
             fetched_at=evidence.fetched_at,
+            reasoning_pattern=evidence.reasoning_pattern,
+            bottleneck=evidence.bottleneck,
+            mechanism=evidence.mechanism,
         )
-

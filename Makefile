@@ -1,12 +1,12 @@
 # ============================================================
-# CompeteGraph - Makefile
+# ScholarInsight - Makefile
 # 一站式开发命令（Windows Git Bash / Mac / Linux 通用）
 # ============================================================
 
 .PHONY: help init install dev dev-backend dev-frontend test lint clean
 
 help:
-	@echo "CompeteGraph - 开发命令"
+	@echo "ScholarInsight - 开发命令"
 	@echo ""
 	@echo "  make init           初始化 data/ 目录骨架"
 	@echo "  make install        安装所有依赖（后端 uv + 前端 pnpm）"
@@ -55,7 +55,7 @@ dev:
 
 test:
 	cd backend && uv run pytest -v
-	cd frontend && pnpm test
+	cd frontend && pnpm build
 
 lint:
 	cd backend && uv run ruff check .

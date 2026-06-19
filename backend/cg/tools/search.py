@@ -682,9 +682,9 @@ def normalize_url(url: str) -> str:
 def classify_source(url: str, title: str = "") -> str:
     text = f"{url} {title}".lower()
     if "zhihu.com" in text or "知乎" in title:
-        return "user_review"
-    if "pricing" in text or "plans" in text or "billing" in text:
-        return "pricing_page"
+        return "discussion"
+    if "arxiv" in text or "doi.org" in text or "paper" in text or text.endswith(".pdf"):
+        return "academic_paper"
     if "docs" in text or "documentation" in text or "help" in text:
         return "docs"
     if "changelog" in text or "release" in text or "updates" in text:
@@ -692,11 +692,9 @@ def classify_source(url: str, title: str = "") -> str:
     if "github.com" in text:
         return "github"
     if "review" in text or "g2.com" in text or "producthunt" in text:
-        return "review_platform"
+        return "review"
     if "blog" in text or "news" in text:
         return "blog"
-    if "enterprise" in text or "security" in text:
-        return "official_website"
     return "official_website" if is_likely_official(url) else "other"
 
 

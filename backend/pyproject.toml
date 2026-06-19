@@ -1,10 +1,10 @@
 [project]
-name = "competegraph"
+name = "scholarinsight"
 version = "0.1.0"
-description = "AI-driven traceable competitive intelligence Agent collaboration system"
+description = "AI-driven traceable academic paper reasoning analysis system"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "CompeteGraph Team" }]
+authors = [{ name = "ScholarInsight Team" }]
 
 dependencies = [
     # Web 框架

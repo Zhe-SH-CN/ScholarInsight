@@ -21,7 +21,7 @@ def test_root() -> None:
         r = client.get("/")
         assert r.status_code == 200
         body = r.json()
-        assert body["name"] == "CompeteGraph API"
+        assert body["name"] == "ScholarInsight API"
         assert "version" in body
 
 

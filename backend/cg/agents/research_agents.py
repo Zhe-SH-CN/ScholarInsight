@@ -182,7 +182,7 @@ class ResearchPlanningAgent(BaseAgent):
         # 解析 LLM 返回的 source_tasks，支持 query_en / query_zh 双字段
         raw_tasks = data.get("source_tasks") or []
         parsed_tasks: list[SourceTask] = []
-        allowed_intents = {"official", "pricing", "docs", "changelog", "review", "enterprise", "news", "comparison"}
+        allowed_intents = {"official", "docs", "review", "news", "comparison"}
         for i, row in enumerate(raw_tasks[:32]):
             if not isinstance(row, dict):
                 continue
@@ -251,7 +251,7 @@ class SourceResearchAgent(BaseAgent):
         self,
         request: ResearchRequest,
         plan: ResearchPlan,
-        search: SearchTool,
+        search: Any,
         memory: SearchMemory | None = None,
         feedback: ResearchFeedback | None = None,
         loop_round: int = 1,
@@ -495,17 +495,17 @@ class SourceResearchAgent(BaseAgent):
                 "你是 SourceResearchAgent 的 ReAct 推理模块。\n"
                 "你要判断当前搜索内容是否足够支撑后续 Evidence 和 Analysis。\n\n"
                 "【停止条件，必须同时满足】\n"
-                "1. 每个产品×每个维度至少有 3 条不同 URL 的候选内容\n"
+                "1. 每个研究方向×每个推理模式至少有 3 篇不同论文的候选内容\n"
                 "2. 核心方向必须有代表性论文和最新进展\n"
                 "3. 核心推理模式维度必须有多篇论文交叉验证\n"
                 "4. Analysis Agent 反馈的缺口已经被补上\n"
                 "5. 最近搜索仍有新增内容；若连续两轮没有新增，系统会自动停止\n\n"
                 "【行动空间】\n"
                 "- 若不满足，生成下一批 query，最多 8 条\n"
-                "- query 可以中文或英文；中文用户体验问题优先给知乎，英文技术/官方问题给 Tavily/Exa\n"
+                "- query 使用英文技术检索语句，面向本地论文库 embedding 检索\n"
                 "- 你可以调整 max_results_per_provider，默认 5；持续找不到好内容时提高到 8-12\n\n"
                 "输出 JSON：{\n"
-                '  "reasoning": "逐产品×维度说明哪里够、哪里不够",\n'
+                '  "reasoning": "逐研究方向×推理模式说明哪里够、哪里不够",\n'
                 '  "should_stop": false,\n'
                 '  "stop_reason": "",\n'
                 '  "max_results_per_provider": 5,\n'
@@ -550,7 +550,7 @@ class SourceResearchAgent(BaseAgent):
         )
 
         tasks: list[SourceTask] = []
-        allowed_intents = {"official", "pricing", "docs", "changelog", "review", "enterprise", "news", "comparison"}
+        allowed_intents = {"official", "docs", "review", "comparison", "news"}
         for i, row in enumerate((data.get("next_tasks") or [])[:8]):
             if not isinstance(row, dict):
                 continue
@@ -569,7 +569,7 @@ class SourceResearchAgent(BaseAgent):
                 dimension=dimension,
                 intent=intent,  # type: ignore[arg-type]
                 query=query,
-                expected_source_types=["user_review"] if dimension == "user_voice" else [],
+                expected_source_types=["academic_paper"],
                 rationale=str(row.get("rationale") or ""),
             ))
         return {
@@ -605,7 +605,7 @@ class SourceResearchAgent(BaseAgent):
                     dimension_url_counts[dim] += 1
 
         coverage_summary = {
-            "每个产品的已有来源数": dict(entity_url_counts),
+            "每个研究方向的已有来源数": dict(entity_url_counts),
             "每个维度的已有来源数": {
                 DIMENSION_LABELS.get(d, d): dimension_url_counts[d]
                 for d in request.analysis_dimensions
@@ -696,7 +696,7 @@ class SourceResearchAgent(BaseAgent):
 
         raw_tasks = data.get("next_tasks") or []
         tasks: list[SourceTask] = []
-        allowed_intents = {"official", "pricing", "docs", "changelog", "review", "enterprise", "news", "comparison"}
+        allowed_intents = {"official", "docs", "review", "comparison", "news"}
         for i, row in enumerate(raw_tasks[:8]):
             if not isinstance(row, dict):
                 continue
@@ -716,7 +716,7 @@ class SourceResearchAgent(BaseAgent):
                 dimension=dimension,
                 intent=intent,  # type: ignore[arg-type]
                 query=query,
-                expected_source_types=["user_review"] if use_zhihu else ["official_website"],
+                expected_source_types=["academic_paper"],
                 rationale=str(row.get("rationale") or ""),
             ))
         return tasks
@@ -743,19 +743,19 @@ class SourceResearchAgent(BaseAgent):
         dominant_share = max(domain_counts.values(), default=0) / max(1, len(deduped))
         if len(deduped) >= 3 and dominant_share > 0.6:
             for entity in entities:
-                if "user_voice" in dimensions:
-                    diversity_task = SourceTask(
-                        task_id=f"gap_diversity_{round_num:02d}_{len(tasks) + 1:02d}",
-                        entity=entity,
-                        dimension="user_voice",
-                        intent="comparison",
-                        query=f"{entity} reviews comparison alternatives user feedback",
-                        expected_source_types=["review_platform", "blog"],
-                        rationale="Diversify source domains and add third-party user perspective.",
-                    )
-                    if diversity_task.query.lower() not in used_queries:
-                        tasks.append(diversity_task)
-                        used_queries.add(diversity_task.query.lower())
+                diversity_dimension = dimensions[0] if dimensions else "other"
+                diversity_task = SourceTask(
+                    task_id=f"gap_diversity_{round_num:02d}_{len(tasks) + 1:02d}",
+                    entity=entity,
+                    dimension=diversity_dimension,
+                    intent="comparison",
+                    query=f"{entity} survey benchmark recent advances",
+                    expected_source_types=["academic_paper"],
+                    rationale="Diversify paper candidates and add broad survey or benchmark coverage.",
+                )
+                if diversity_task.query.lower() not in used_queries:
+                    tasks.append(diversity_task)
+                    used_queries.add(diversity_task.query.lower())
                 if len(tasks) >= 2:
                     break
 
@@ -810,7 +810,7 @@ class SourceResearchAgent(BaseAgent):
 
     async def search_task(
         self,
-        search: SearchTool,
+        search: Any,
         task: SourceTask,
         max_results: int,
         search_round: str,
@@ -921,57 +921,31 @@ class EvidenceStructuringAgent(BaseAgent):
         if not self.llm_enabled or not document.content:
             return deterministic_items
 
-        is_user_voice = document.source_type in {"user_review", "review_platform"}
-
-        if is_user_voice:
-            system_prompt = (
-                "你是论文创新证据提取智能体（EvidenceStructuringAgent），专门从学术论文中提取结构化创新证据。\n"
-                "\n"
-                "【当前来源类型】学术论文\n"
-                "\n"
-                "【提取规则】\n"
-                "1. 重点提取论文的创新点、方法论、实验结果、与现有方法的对比\n"
-                "2. 每条证据必须包含：reasoning_pattern（推理模式）、bottleneck（瓶颈）、mechanism（机制）\n"
-                "3. reasoning_pattern 必须是 15 种之一：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
-                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
-                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
-                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
-                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
-                "4. bottleneck：该论文要解决的具体技术瓶颈是什么\n"
-                "5. mechanism：论文提出的具体解决机制是什么\n"
-                "6. fact 字段：用中文写一句完整的创新事实，包含：论文名 + 具体创新内容\n"
-                "7. quote 必须是论文原文中的连续片段，保留原文措辞\n"
-                "8. confidence 按证据强度打分：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
-                "\n"
-                f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"paper": "论文名", "dimension": "维度", "reasoning_pattern": "推理模式", "bottleneck": "瓶颈", "mechanism": "机制", "fact": "创新事实", "quote": "原文片段", "confidence": 0.8}]}\n'
-                "每篇论文最多提取 8 条，只保留有实质创新信息的。"
-            )
-        else:
-            system_prompt = (
-                "你是论文创新证据提取智能体（EvidenceStructuringAgent），专门从学术论文中提取结构化创新证据。\n"
-                "\n"
-                "【当前来源类型】学术论文\n"
-                "\n"
-                "【提取规则】\n"
-                "1. 只提取可验证的创新事实，禁止提取推测、空洞评价或无法核实的声明\n"
-                "2. 每条证据必须包含：reasoning_pattern（推理模式）、bottleneck（瓶颈）、mechanism（机制）\n"
-                "3. reasoning_pattern 必须是 15 种之一：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
-                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
-                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
-                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
-                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
-                "4. bottleneck：该论文要解决的具体技术瓶颈是什么\n"
-                "5. mechanism：论文提出的具体解决机制是什么\n"
-                "6. fact 字段：用中文写一句完整的创新事实，包含：论文名 + 具体创新内容\n"
-                "7. quote 必须是论文原文中的连续片段，字数 20-300，不能改写\n"
-                "8. confidence 按证据强度：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
-                "9. 同一创新点只提取一次，不要重复\n"
-                "\n"
-                f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"paper": "论文名", "dimension": "维度", "reasoning_pattern": "推理模式", "bottleneck": "瓶颈", "mechanism": "机制", "fact": "创新事实", "quote": "原文片段", "confidence": 0.8}]}\n'
-                "每篇论文最多提取 10 条最重要的创新证据。"
-            )
+        allow_relaxed_quote_match = document.source_type in {"academic_paper", "local_paper"}
+        system_prompt = (
+            "你是论文创新证据提取智能体（EvidenceStructuringAgent），专门从学术论文中提取结构化创新证据。\n"
+            "\n"
+            "【当前来源类型】学术论文\n"
+            "\n"
+            "【提取规则】\n"
+            "1. 只提取可验证的创新事实，禁止提取推测、空洞评价或无法核实的声明\n"
+            "2. 每条证据必须包含：reasoning_pattern（推理模式）、bottleneck（瓶颈）、mechanism（机制）\n"
+            "3. reasoning_pattern 必须是 15 种之一：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
+            "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
+            "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
+            "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
+            "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
+            "4. bottleneck：该论文要解决的具体技术瓶颈是什么\n"
+            "5. mechanism：论文提出的具体解决机制是什么\n"
+            "6. fact 字段：用中文写一句完整的创新事实，包含：论文名 + 具体创新内容\n"
+            "7. quote 必须是论文原文中的连续片段，字数 20-300，不能改写\n"
+            "8. confidence 按证据强度：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
+            "9. 同一创新点只提取一次，不要重复\n"
+            "\n"
+            f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
+            '输出 JSON：{"evidence":[{"paper": "论文名", "dimension": "维度", "reasoning_pattern": "推理模式", "bottleneck": "瓶颈", "mechanism": "机制", "fact": "创新事实", "quote": "原文片段", "confidence": 0.8}]}\n'
+            "每篇论文最多提取 12 条最重要的创新证据。"
+        )
 
         data = await self.invoke_json(
             system=system_prompt,
@@ -988,7 +962,7 @@ class EvidenceStructuringAgent(BaseAgent):
             return deterministic_items
         items: list[Evidence] = []
         content_lower = document.content.lower()
-        max_items = 10 if is_user_voice else 12
+        max_items = 12
         for row in rows[:max_items]:
             if not isinstance(row, dict):
                 continue
@@ -1001,13 +975,15 @@ class EvidenceStructuringAgent(BaseAgent):
                 continue
             # 学术论文：LLM 可能从论文任意部分提取 quote，不要求严格匹配 content
             # 只要求 quote 包含一些 content 中的单词即可
-            if not is_user_voice and quote.lower() not in content_lower:
+            if allow_relaxed_quote_match and quote.lower() not in content_lower:
                 # 放宽检查：只要 quote 中有 30% 以上的单词出现在 content 中就接受
                 quote_words = set(quote.lower().split())
                 content_words = set(content_lower.split())
                 overlap = len(quote_words & content_words) / max(len(quote_words), 1)
                 if overlap < 0.3:
                     continue
+            elif not allow_relaxed_quote_match and quote.lower() not in content_lower:
+                continue
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
             evidence_id = stable_id_fn("ev", f"{self.ctx.run_id}:{document.url}:{dimension}:{quote}")
             paper = str(row.get("paper") or "").strip() or None
@@ -1056,7 +1032,7 @@ class AnalysisAndReviewAgent(BaseAgent):
         if not self.llm_enabled or not evidence:
             return deterministic_claims
 
-        # 从 evidence 或 request 里推断产品名
+        # 从 evidence 或 request 里推断研究方向
         topic = request.target_topic if request else "研究方向"
 
         # 按维度聚合 Evidence，便于 LLM 做横向对比
@@ -1073,6 +1049,10 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "confidence": ev.confidence,
             })
 
+        # 构建 evidence 映射，用于后续检查
+        evidence_by_id = {ev.evidence_id: ev for ev in evidence}
+        evidence_ids = set(evidence_by_id.keys())
+
         data = await self.invoke_json(
             system=(
                 "你是推理模式分析智能体（AnalysisAndReviewAgent）的结论生成技能。\n"
@@ -1081,20 +1061,31 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "你的工作是从论文 Evidence 中提炼真正有价值的推理模式洞察，而不是简单复述证据。\n"
                 "好的 Claim 要回答：'在这个推理模式上，这些论文之间的关键创新差异是什么？这对该领域意味着什么？'\n"
                 "\n"
-                "【结论生成要求】\n"
-                "1. 优先生成【推理模式对比型】结论：\n"
-                "   '在跨领域综合模式上，论文A将知识图谱引入LLM推理，而论文B则从多模态角度进行综合'\n"
-                "2. 其次生成【单论文洞察型】结论：\n"
-                "   '论文C的表征转换创新在于将图结构转化为序列表示，突破了传统GNN的表达瓶颈'\n"
-                "3. 避免生成【无实质内容的废话型】结论：\n"
+                "【结论生成要求 - 严格执行】\n"
+                "1. 【推理模式对比型】结论：必须引用 >=2 篇不同论文的证据\n"
+                "   ✓ '在跨领域综合模式上，论文A将知识图谱引入LLM推理，而论文B则从多模态角度进行综合'\n"
+                "   ✗ 如果只有1篇论文有证据，禁止生成对比型结论\n"
+                "2. 【单论文洞察型】结论：必须引用 >=2 条来自同一论文的证据\n"
+                "   ✓ '论文C的表征转换创新在于将图结构转化为序列表示，有2条证据支持'\n"
+                "   ✗ 如果只有1条证据，只能生成描述性结论，措辞必须保守\n"
+                "3. 禁止生成【无实质内容的废话型】结论：\n"
                 "   '各论文均在积极探索'（×）'方法较为新颖'（×）\n"
-                "4. 每条 Claim 必须绑定至少 1 条 supporting_evidence_id，且 evidence_id 必须真实存在\n"
+                "4. 每条 Claim 必须绑定 supporting_evidence_ids，且 evidence_id 必须真实存在\n"
                 "5. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
-                "6. confidence 反映证据充分程度：多源交叉验证 → 0.80+，单源 → 0.55-0.70\n"
+                "6. confidence 反映证据充分程度：\n"
+                "   - 多篇论文交叉验证 → 0.75-0.85\n"
+                "   - 单篇论文多条证据 → 0.60-0.75\n"
+                "   - 仅1条证据 → 0.45-0.55（措辞必须非常保守）\n"
+                "\n"
+                "【证据充分性检查 - 必须遵守】\n"
+                "- 对比型结论：supporting_evidence_ids 必须来自 >=2 篇不同论文\n"
+                "- 单论文结论：supporting_evidence_ids 必须有 >=2 条证据\n"
+                "- 如果证据不足，降低 confidence 或跳过该结论\n"
                 "\n"
                 "【输出格式】JSON：\n"
                 '{"claims":[{\n'
                 '  "dimension": "推理模式英文key",\n'
+                '  "claim_type": "comparative|single_paper|descriptive",\n'
                 '  "claim": "完整的分析结论（中文，50-200字）",\n'
                 '  "supporting_evidence_ids": ["ev_xxx", "ev_yyy"],\n'
                 '  "confidence": 0.75,\n'
@@ -1105,7 +1096,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 f"研究方向：{topic}\n\n"
                 "按维度聚合的 Evidence（请逐维度分析，生成推理模式结论）：\n"
                 + "\n\n".join(
-                    f"=== {DIMENSION_LABELS.get(dim, dim)} 维度（{len(items)} 条证据）===\n"
+                    f"=== {DIMENSION_LABELS.get(dim, dim)} 维度（{len(items)} 条证据，来自 {len(set(ev['paper'] for ev in items if ev['paper']))} 篇论文）===\n"
                     + "\n".join(
                         f"[{ev['evidence_id']}] {ev['paper'] or '?'} | {ev['source_type']} | "
                         f"置信度{ev['confidence']:.2f}\n事实：{ev['fact']}\n摘要：{ev['quote'][:120]}"
@@ -1118,7 +1109,6 @@ class AnalysisAndReviewAgent(BaseAgent):
         rows = data.get("claims") if data else None
         if not isinstance(rows, list):
             return deterministic_claims
-        evidence_ids = {ev.evidence_id for ev in evidence}
         claims: list[Claim] = []
         for row in rows[:24]:
             if not isinstance(row, dict):
@@ -1126,12 +1116,34 @@ class AnalysisAndReviewAgent(BaseAgent):
             supporting = [ev_id for ev_id in coerce_str_list(row.get("supporting_evidence_ids")) if ev_id in evidence_ids]
             if not supporting:
                 continue
+
+            # 推断 claim 类型（不依赖 LLM 输出）
+            supporting_papers = set()
+            for ev_id in supporting:
+                ev = evidence_by_id.get(ev_id)
+                if ev and ev.paper:
+                    supporting_papers.add(ev.paper)
+
+            # 自动推断 claim_type
+            if len(supporting_papers) >= 2:
+                claim_type = "comparative"  # 多篇论文 → 对比型
+            elif len(supporting) >= 2:
+                claim_type = "single_paper"  # 同一篇论文多条证据 → 单论文洞察型
+            else:
+                claim_type = "descriptive"  # 仅1条证据 → 描述型
+
             dimension = str(row.get("dimension") or "other")
             claim_text = str(row.get("claim") or "").strip()
             if len(claim_text) < 12:
                 continue
-            claim_id = make_stable_id("claim", f"{self.ctx.run_id}:{dimension}:{claim_text}:{supporting}")
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
+            if claim_type == "descriptive":
+                confidence = min(confidence, 0.55)
+                if not re.match(r"^(根据|基于|现有|从|该证据)", claim_text):
+                    claim_text = f"现有单篇论文证据显示，{claim_text}"
+            elif claim_type == "single_paper":
+                confidence = min(confidence, 0.75)
+            claim_id = make_stable_id("claim", f"{self.ctx.run_id}:{dimension}:{claim_text}:{supporting}")
             claims.append(
                 Claim(
                     claim_id=claim_id,
@@ -1173,10 +1185,10 @@ class AnalysisAndReviewAgent(BaseAgent):
             "专门从反方视角审查论文推理模式分析结论的可信度和风险。\n"
             "\n"
             "【审查维度】（每条 Claim 逐一检查）\n"
-            "1. 【来源单一风险】：所有证据来自同一域名/产品官方 → severity=high\n"
+            "1. 【来源单一风险】：所有证据来自同一论文或同一来源 → severity=high\n"
             "2. 【证据不足风险】：仅 1 条证据支撑强结论 → severity=medium/high\n"
             "3. 【过度推断风险】：结论超出证据直接支持的范围 → severity=medium\n"
-            "4. 【时效风险】：证据可能过时（产品更新快，6个月前的数据需标注）→ severity=low\n"
+            "4. 【时效风险】：证据可能过时（快速演进方向中，较旧论文需标注时间边界）→ severity=low\n"
             "5. 【措辞风险】：使用了'最好'、'唯一'、'绝对'等绝对化表述而证据不支撑 → severity=medium\n"
             "6. 【实验验证缺失】：理论分析充分但缺乏实验结果佐证 → severity=low\n"
             "\n"
@@ -1287,14 +1299,21 @@ class AnalysisAndReviewAgent(BaseAgent):
         *,
         matrix_builder: Callable[[list[Evidence], list[str], list[str]], Any],
         recommendations_builder: Callable[[str, ResearchRequest, list[Claim], list[Evidence], Any], list[Any]],
-        # battlecards_builder removed - not needed for academic papers
         graph_builder: Callable[[list[Evidence], list[Claim]], Any],
         observability_builder: Callable[..., Any],
         average_fn: Callable[[list[float]], float],
         unique_strings_fn: Callable[[list[str | None]], list[str]],
     ) -> dict[str, Any]:
         dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-        papers = unique_strings_fn([request.target_topic])
+        paper_counts = Counter(ev.paper for ev in evidence if ev.paper)
+        papers = unique_strings_fn(
+            [
+                *request.seed_papers,
+                *[paper for paper, _ in paper_counts.most_common()],
+            ]
+        )[:12]
+        if not papers:
+            papers = [request.target_topic]
         matrix = matrix_builder(evidence, papers, dimensions)
         recommendations = recommendations_builder(self.ctx.run_id, request, claims, evidence, matrix)
         evidence_graph = graph_builder(evidence, claims)
@@ -1352,7 +1371,6 @@ class AnalysisAndReviewAgent(BaseAgent):
             (entity, dim)
             for entity, dim in weak_cells
             if entity == request.target_topic
-            or dim in {"positioning", "feature", "pricing", "user_voice", "enterprise"}
         ]
 
         # 覆盖度足够且没有关键空白/弱覆盖时才停止，避免 50% 这种刚过线的状态过早收敛。
@@ -1418,7 +1436,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "只有同时满足以下条件时才停止：\n"
                 f"  1. 覆盖度 ≥ {self.ctx.settings.cg_min_coverage_to_stop:.0%}\n"
                 "  2. 没有关键维度的空白格/弱覆盖格\n"
-                "  3. 核心推理模式在至少 3 个维度有证据\n"
+                "  3. 核心研究方向已有多个推理模式的有效证据\n"
                 "  4. 若仍存在高优先级缺口，即使已到第 2 轮也继续建议补充搜索\n"
                 "\n"
                 "【缺口优先级判断】\n"
@@ -1428,9 +1446,8 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "  low（可选补）：非核心维度证据较弱\n"
                 "\n"
                 "【suggested_queries 要求】\n"
-                "  - 必须具体，包含产品名 + 维度关键词\n"
-                "  - 用户声音类写中文口语（知乎风格）\n"
-                "  - 官方/技术类写英文精确查询\n"
+                "  - 必须具体，包含研究方向 + 推理模式关键词\n"
+                "  - 查询写英文技术检索语句，适配本地论文库 embedding 检索\n"
                 "\n"
                 "【输出格式】JSON：\n"
                 "{\n"
@@ -1450,7 +1467,7 @@ class AnalysisAndReviewAgent(BaseAgent):
             user=(
                 f"研究方向：{request.target_topic}\n"
                 f"当前轮次：第 {loop_round} 轮  当前覆盖度：{coverage_score:.0%}\n\n"
-                f"证据覆盖矩阵（产品×维度 → 证据条数）：\n"
+                f"证据覆盖矩阵（研究方向×推理模式 → 证据条数）：\n"
                 + "\n".join(
                     f"  {e} × {DIMENSION_LABELS.get(d, d)}: {coverage_map.get((e, d), 0)} 条"
                     for e in [request.target_topic]
@@ -1558,20 +1575,20 @@ class ReportComposerAgent(BaseAgent):
                 "- 'ev_'开头的evidence_id\n"
                 "- '置信度0.XX'、'strong·0.76'等置信度分数\n"
                 "- '该来源 在...相关公开资料中出现了可核验表述'这类系统内部描述\n"
-                "- '相关证据集中在X等产品，说明用户会用这个维度判断工具是否值得迁移或付费'这类套话\n"
+                "- '相关证据集中在X，说明该方向值得持续关注'这类无信息量套话\n"
                 "- 任何'X在Y维度有Z条证据'的表述\n"
                 "\n"
                 "【报告质量要求】\n"
-                "1. 摘要要有真正的判断：谁在哪个维度领先、竞争格局如何、目标产品的核心机会在哪里\n"
+                "1. 摘要要有真正的学术判断：哪些推理模式最突出、哪些论文机制最有启发、研究空白在哪里\n"
                 "2. 推理模式对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
-                "3. 每个维度分析要写对比性段落：说清楚各家的差异是什么、意味着什么、谁更适合哪类用户\n"
+                "3. 每个模式分析要写对比性段落：说清楚论文间的瓶颈、机制、实验支撑和适用边界差异\n"
                 "4. 给出具体的、有据可查的结论——不要写'各有优劣'、'建议持续关注'这类无信息量的话\n"
                 "5. 研究建议要给出能直接指导后续研究的差异化方向，针对具体场景，避免模板化\n"
                 "6. 研究建议要可操作，结合推理模式分布说明为什么这么建议\n"
                 "7. 每个关键判断后用方括号标注来源编号，如[1][3]，不要暴露内部ID\n"
                 "8. 证据条目后附有（YYYY-MM）格式的发布月份标注；时效性敏感维度（资源需求、方法更新、研究动态）"
                 "优先引用较新的证据，若只有旧证据可用，应在报告中注明'截至YYYY年MM月'并提示信息可能已更新\n"
-                "9. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的商业分析。\n"
+                "9. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的学术分析。\n"
                 "10. 如果 briefing notes 对某个判断支持不足，请直接写'现有公开证据不足以判断'，不要补充想象。\n"
                 "\n"
                 "【报告结构】（Markdown格式）\n"
@@ -1579,14 +1596,14 @@ class ReportComposerAgent(BaseAgent):
                 "## 执行摘要\n"
                 "3-5条核心结论，每条直接给出判断\n"
                 "## 推理模式格局概览\n"
-                "简短段落描述各产品的市场定位和竞争角色\n"
+                "简短段落描述主要论文、机制簇和研究脉络\n"
                 "## 推理模式能力对比矩阵\n"
                 "Markdown表格，每格写简洁文字判断\n"
-                "## 各维度深度分析\n"
-                "每个维度一节，写比较性分析段落\n"
-                "## 目标产品分析：优势与机会\n"
-                "## 目标产品分析：不足与风险\n"
-                "## 战略建议\n"
+                "## 各推理模式深度分析\n"
+                "每个推理模式一节，写比较性分析段落\n"
+                "## 代表性论文：机制与启发\n"
+                "## 研究空白与风险\n"
+                "## 后续研究路线\n"
                 "## 研究建议\n"
                 "## 参考来源\n"
                 "在此处输出占位符 <<REFERENCES>>，系统会自动替换为完整的参考来源列表\n"
@@ -1678,12 +1695,11 @@ class ReportComposerAgent(BaseAgent):
         artifacts: dict[str, Any],
         citation_map: dict[str, int],
     ) -> dict[str, Any]:
-        matrix: CompetitorMatrix | None = artifacts.get("matrix")
+        matrix: PaperPatternMatrix | None = artifacts.get("matrix")
         recommendations: list[OpportunityRecommendation] = artifacts.get("recommendations") or []
-        battlecards = []
         observability: ObservabilitySnapshot | None = artifacts.get("observability")
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_topic]
+        entities = matrix.papers[:12] if matrix and matrix.papers else [request.target_topic]
 
         def cite(evidence_ids: list[str], limit: int = 4) -> str:
             seen: list[int] = []
@@ -1818,7 +1834,7 @@ class ReportComposerAgent(BaseAgent):
         evidence: list[Evidence],
         claims: list[Claim],
         metrics: RunMetrics,
-        matrix: CompetitorMatrix,
+        matrix: PaperPatternMatrix,
         recommendations: list[OpportunityRecommendation],
         observability: ObservabilitySnapshot,
     ) -> str:
@@ -1884,7 +1900,7 @@ class ReportComposerAgent(BaseAgent):
         evidence: list[Evidence],
         claims: list[Claim],
         metrics: RunMetrics,
-        matrix: CompetitorMatrix,
+        matrix: PaperPatternMatrix,
         observability: ObservabilitySnapshot,
     ) -> str:
         if not self.llm_enabled:
@@ -1937,7 +1953,7 @@ class ReportComposerAgent(BaseAgent):
             system=(
                 "你是推理模式研究方法论说明的作者。请基于输入中的真实运行数据说明本次研究如何完成，"
                 "包括研究设计、来源采集、Evidence 抽取、Claim 生成与 Red Team 审查、质量门禁和局限性。"
-                "不要写成产品介绍，不要暴露内部文件路径，不要把质量门禁简单逐字翻译成表格。"
+                "不要写成系统介绍，不要暴露内部文件路径，不要把质量门禁简单逐字翻译成表格。"
                 "输出中文 Markdown，结构为：# Methodology、## Research Design、## Evidence Pipeline、"
                 "## Claim Review、## Quality Controls、## Known Limits。"
             ),
@@ -1978,15 +1994,19 @@ def deterministic_plan(request: ResearchRequest) -> ResearchPlan:
     queries: list[str] = []
     source_tasks: list[SourceTask] = []
     for entity in entities:
-        add_source_task(source_tasks, entity, "positioning", "official", f"{entity} official product features", ["official_website"])
-        if "pricing" in dimensions:
-            add_source_task(source_tasks, entity, "pricing", "pricing", f"{entity} pricing plans", ["pricing_page"])
-        if "enterprise" in dimensions:
-            add_source_task(source_tasks, entity, "enterprise", "enterprise", f"{entity} enterprise security", ["official_website", "docs"])
-        if "user_voice" in dimensions:
-            add_source_task(source_tasks, entity, "user_voice", "review", f"{entity} user reviews feedback", ["review_platform", "blog"])
-        if "strategy" in dimensions:
-            add_source_task(source_tasks, entity, "strategy", "news", f"{entity} product roadmap market strategy", ["blog", "changelog"])
+        add_source_task(
+            source_tasks,
+            entity,
+            "gap_driven_reframing",
+            "official",
+            f"{entity} limitations challenges bottlenecks survey",
+            ["academic_paper"],
+        )
+        for dimension in dimensions:
+            if dimension == "gap_driven_reframing":
+                continue
+            task = make_gap_source_task(entity, dimension, len(source_tasks) + 1)
+            source_tasks.append(task)
     queries = [task.query for task in source_tasks]
     return ResearchPlan(
         research_goal=request.research_goal,
@@ -1996,7 +2016,7 @@ def deterministic_plan(request: ResearchRequest) -> ResearchPlan:
         source_tasks=source_tasks[:18],
         required_agents=RESEARCH_AGENT_FLOW.copy(),
         quality_rules=[
-            "所有 Evidence 必须绑定原始 URL 和原文片段",
+            "所有 Evidence 必须绑定论文来源和原文片段",
             "每条关键 Claim 优先绑定 2 条以上 Evidence",
             "来源单一、低置信度或过度推断的 Claim 必须降级措辞",
         ],
@@ -2071,11 +2091,11 @@ def build_gap_source_tasks(
             task = SourceTask(
                 task_id=f"gap_diversity_{len(gap_tasks) + 1:02d}",
                 entity=entity,
-                dimension="user_voice" if "user_voice" in dimensions else "strategy",
+                dimension=dimensions[0] if dimensions else "other",
                 intent="comparison",
-                query=f"{entity} reviews comparison alternatives user feedback",
-                expected_source_types=["review_platform", "blog"],
-                rationale="Second pass to diversify source domains and add third-party perspective.",
+                query=f"{entity} survey benchmark recent advances",
+                expected_source_types=["academic_paper"],
+                rationale="Second pass to diversify paper candidates and add survey or benchmark perspective.",
             )
             append_gap_task(gap_tasks, task, used_queries, "diversify source domains")
             if len(gap_tasks) >= 4:
@@ -2108,42 +2128,31 @@ def append_gap_task(
 
 
 def make_gap_source_task(entity: str, dimension: str, index: int) -> SourceTask:
-    intent_by_dimension = {
-        "positioning": "official",
-        "feature": "docs",
-        "pricing": "pricing",
-        "user_voice": "review",
-        "enterprise": "enterprise",
-        "strategy": "news",
-        "gtm": "comparison",
-    }
     query_by_dimension = {
-        "positioning": f"{entity} official product positioning features",
-        "feature": f"{entity} docs features capabilities",
-        "pricing": f"{entity} pricing plans",
-        "user_voice": f"{entity} user reviews feedback",
-        "enterprise": f"{entity} enterprise security admin compliance",
-        "strategy": f"{entity} roadmap changelog launch market strategy",
-        "gtm": f"{entity} customers case studies partners",
+        "gap_driven_reframing": f"{entity} limitations challenges bottlenecks problem reframing",
+        "cross_domain_synthesis": f"{entity} cross-domain synthesis knowledge graph multimodal integration",
+        "representation_shift": f"{entity} representation learning embedding latent structure transformation",
+        "modular_pipeline_composition": f"{entity} modular pipeline agent framework tool composition",
+        "data_evaluation_engineering": f"{entity} benchmark dataset evaluation metric annotation",
+        "principled_probabilistic_modeling": f"{entity} probabilistic modeling uncertainty bayesian inference",
+        "formal_experimental_tightening": f"{entity} theorem proof ablation controlled experiment rigorous evaluation",
+        "approximation_engineering": f"{entity} approximation heuristic scalable efficient inference sampling",
+        "inference_time_control": f"{entity} inference-time control decoding planning self-correction",
+        "structural_inductive_bias": f"{entity} structural inductive bias graph constraints hierarchy",
+        "multiscale_hierarchical_modeling": f"{entity} multiscale hierarchical modeling coarse-to-fine reasoning",
+        "mechanistic_decomposition": f"{entity} mechanism decomposition interpretability causal analysis",
+        "adversary_modeling": f"{entity} adversarial robustness attack defense red teaming",
+        "numerics_systems_codesign": f"{entity} systems codesign quantization kernel latency throughput",
+        "data_centric_optimization": f"{entity} data-centric optimization data selection curation augmentation",
     }
-    expected_by_intent = {
-        "official": ["official_website"],
-        "docs": ["docs"],
-        "pricing": ["pricing_page"],
-        "review": ["review_platform", "blog"],
-        "enterprise": ["official_website", "docs"],
-        "news": ["blog", "changelog"],
-        "comparison": ["review_platform", "blog"],
-    }
-    intent = intent_by_dimension.get(dimension, "comparison")
     return SourceTask(
         task_id=f"gap_coverage_{index:02d}",
         entity=entity,
         dimension=dimension,
-        intent=intent,  # type: ignore[arg-type]
-        query=query_by_dimension.get(dimension, f"{entity} {dimension} public sources"),
-        expected_source_types=expected_by_intent.get(intent, ["other"]),
-        rationale="Generated after first-pass search found low coverage.",
+        intent="comparison",
+        query=query_by_dimension.get(dimension, f"{entity} {dimension} academic papers"),
+        expected_source_types=["academic_paper"],
+        rationale="Generated after first-pass paper search found low coverage.",
     )
 
 
@@ -2238,13 +2247,21 @@ def provider_display_name(provider: str) -> str:
 
 def dimension_search_keywords(dimension: str) -> list[str]:
     return {
-        "positioning": ["official", "features", "product", "overview"],
-        "feature": ["docs", "features", "capabilities"],
-        "pricing": ["pricing", "plans", "billing"],
-        "user_voice": ["review", "reviews", "feedback", "community"],
-        "enterprise": ["enterprise", "security", "admin", "compliance"],
-        "strategy": ["roadmap", "changelog", "launch", "market", "strategy"],
-        "gtm": ["customers", "case studies", "partners"],
+        "gap_driven_reframing": ["gap", "limitation", "challenge", "bottleneck", "reframe"],
+        "cross_domain_synthesis": ["cross-domain", "synthesis", "integrate", "hybrid", "knowledge graph"],
+        "representation_shift": ["representation", "embedding", "latent", "encode", "token"],
+        "modular_pipeline_composition": ["pipeline", "module", "component", "framework", "agent"],
+        "data_evaluation_engineering": ["benchmark", "dataset", "evaluation", "metric", "annotation"],
+        "principled_probabilistic_modeling": ["probabilistic", "bayesian", "uncertainty", "distribution"],
+        "formal_experimental_tightening": ["theorem", "proof", "ablation", "controlled experiment", "rigorous"],
+        "approximation_engineering": ["approximation", "heuristic", "efficient", "scalable", "sampling"],
+        "inference_time_control": ["inference-time", "decoding", "test-time", "planning", "search"],
+        "structural_inductive_bias": ["inductive bias", "structure", "graph", "hierarchy", "constraint"],
+        "multiscale_hierarchical_modeling": ["hierarchical", "multi-scale", "coarse-to-fine", "granularity"],
+        "mechanistic_decomposition": ["mechanism", "decompose", "interpretability", "causal"],
+        "adversary_modeling": ["adversarial", "robust", "attack", "defense", "red-team"],
+        "numerics_systems_codesign": ["system", "hardware", "kernel", "quantization", "latency"],
+        "data_centric_optimization": ["data-centric", "data selection", "curation", "augmentation", "quality"],
     }.get(dimension, [dimension])
 
 
@@ -2325,7 +2342,7 @@ def normalize_source_tasks(value: Any, fallback: list[SourceTask]) -> list[Sourc
     if not isinstance(value, list):
         return fallback
     tasks: list[SourceTask] = []
-    allowed_intents = {"official", "pricing", "docs", "changelog", "review", "enterprise", "news", "comparison"}
+    allowed_intents = {"official", "docs", "review", "news", "comparison"}
     for row in value[:24]:
         if not isinstance(row, dict):
             continue
@@ -2451,14 +2468,23 @@ def clamp_float(value: Any, low: float, high: float) -> float:
     return round(max(low, min(high, parsed)), 3)
 
 
-# 按维度的时效半衰期（天）：资源需求变化快，研究定位变化慢
+# 按推理模式的时效半衰期（天）：系统/推理时控制更新更快，基础建模和理论相对更慢。
 _FRESHNESS_HALF_LIFE: dict[str, float] = {
-    "pricing":     90,    # 3 个月，旧资源需求基本失效
-    "strategy":    120,   # 4 个月
-    "feature":     180,   # 6 个月
-    "enterprise":  270,   # 9 个月
-    "user_voice":  365,   # 1 年
-    "positioning": 730,   # 2 年，定位变化最慢
+    "inference_time_control": 180,
+    "numerics_systems_codesign": 180,
+    "data_centric_optimization": 240,
+    "data_evaluation_engineering": 300,
+    "modular_pipeline_composition": 300,
+    "adversary_modeling": 300,
+    "cross_domain_synthesis": 365,
+    "representation_shift": 365,
+    "approximation_engineering": 365,
+    "mechanistic_decomposition": 365,
+    "structural_inductive_bias": 540,
+    "multiscale_hierarchical_modeling": 540,
+    "gap_driven_reframing": 730,
+    "principled_probabilistic_modeling": 730,
+    "formal_experimental_tightening": 730,
 }
 
 def compute_freshness_score(published_at: datetime | None, dimension: str) -> float:

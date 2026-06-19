@@ -30,53 +30,39 @@ class FakeSearch:
 @pytest.mark.asyncio
 async def test_discover_runs_gap_search_when_first_pass_has_coverage_gaps(tmp_path: Path) -> None:
     request = ResearchRequest(
-        project_name="Gap search",
-        target_product="Alpha",
-        competitors=["Beta"],
-        analysis_dimensions=["positioning", "pricing"],
+        project_name="Pattern gap search",
+        target_topic="Knowledge Graph Reasoning",
+        seed_papers=["GraphRAG"],
+        analysis_dimensions=["gap_driven_reframing", "cross_domain_synthesis"],
         max_sources=4,
         max_sources_per_query=2,
+        max_search_rounds=2,
     )
     plan = ResearchPlan(
         research_goal=request.research_goal,
-        competitors=request.competitors,
+        papers=request.seed_papers,
         dimensions=request.analysis_dimensions,
         queries=[],
         source_tasks=[
             SourceTask(
                 task_id="task_01",
-                entity="Alpha",
-                dimension="positioning",
+                entity="Knowledge Graph Reasoning",
+                dimension="gap_driven_reframing",
                 intent="official",
-                query="Alpha official product features",
-                expected_source_types=["official_website"],
-            ),
-            SourceTask(
-                task_id="task_02",
-                entity="Beta",
-                dimension="pricing",
-                intent="pricing",
-                query="Beta pricing plans",
-                expected_source_types=["pricing_page"],
+                query="Knowledge Graph Reasoning limitations bottlenecks survey",
+                expected_source_types=["academic_paper"],
             ),
         ],
     )
     search = FakeSearch(
         {
-            "Alpha official product features": [
+            "Knowledge Graph Reasoning limitations bottlenecks survey": [
                 SourceCandidate(
-                    url="https://alpha.example/product",
-                    title="Alpha product",
-                    source_type="official_website",
+                    url="/papers/graphrag.pdf",
+                    title="Knowledge Graph Reasoning limitations survey",
+                    snippet="Knowledge Graph Reasoning bottlenecks and problem reframing.",
+                    source_type="academic_paper",
                     score=0.7,
-                )
-            ],
-            "Beta pricing plans": [
-                SourceCandidate(
-                    url="https://beta.example/pricing",
-                    title="Beta pricing",
-                    source_type="pricing_page",
-                    score=0.72,
                 )
             ],
         }
@@ -84,80 +70,76 @@ async def test_discover_runs_gap_search_when_first_pass_has_coverage_gaps(tmp_pa
 
     candidates = await make_agent(tmp_path).discover(request, plan, search)  # type: ignore[arg-type]
 
-    assert search.queries[:2] == ["Alpha official product features", "Beta pricing plans"]
-    assert "Alpha pricing plans" in search.queries
-    assert "Beta official product positioning features" in search.queries
-    assert {candidate.url for candidate in candidates} == {
-        "https://beta.example/pricing",
-        "https://alpha.example/product",
-    }
+    assert search.queries[0] == "Knowledge Graph Reasoning limitations bottlenecks survey"
+    assert "Knowledge Graph Reasoning cross-domain synthesis knowledge graph multimodal integration" in search.queries
+    assert {candidate.url for candidate in candidates} == {"/papers/graphrag.pdf"}
     assert all(candidate.query for candidate in candidates)
 
 
 @pytest.mark.asyncio
 async def test_discover_uses_second_pass_to_break_domain_concentration(tmp_path: Path) -> None:
     request = ResearchRequest(
-        project_name="Domain diversity",
-        target_product="Alpha",
-        competitors=["Beta"],
-        analysis_dimensions=["positioning", "user_voice"],
+        project_name="Filled source budget",
+        target_topic="Retrieval-Augmented Generation",
+        seed_papers=["Self-RAG"],
+        analysis_dimensions=["gap_driven_reframing", "data_evaluation_engineering"],
         max_sources=3,
         max_sources_per_query=3,
+        max_search_rounds=2,
     )
     plan = ResearchPlan(
         research_goal=request.research_goal,
-        competitors=request.competitors,
+        papers=request.seed_papers,
         dimensions=request.analysis_dimensions,
         queries=[],
         source_tasks=[
             SourceTask(
                 task_id="task_01",
-                entity="Alpha",
-                dimension="positioning",
+                entity="Retrieval-Augmented Generation",
+                dimension="gap_driven_reframing",
                 intent="official",
-                query="Alpha official product features",
-                expected_source_types=["official_website"],
+                query="Retrieval-Augmented Generation limitations bottlenecks survey",
+                expected_source_types=["academic_paper"],
             )
         ],
     )
     search = FakeSearch(
         {
-            "Alpha official product features": [
+            "Retrieval-Augmented Generation limitations bottlenecks survey": [
                 SourceCandidate(
-                    url="https://alpha.example/product",
-                    title="Alpha product",
-                    source_type="official_website",
+                    url="/papers/rag-1.pdf",
+                    title="Retrieval-Augmented Generation limitations",
+                    snippet="RAG bottlenecks and problem reframing.",
+                    source_type="academic_paper",
                     score=0.83,
                 ),
                 SourceCandidate(
-                    url="https://alpha.example/docs",
-                    title="Alpha docs",
-                    source_type="docs",
+                    url="/papers/rag-2.pdf",
+                    title="Retrieval-Augmented Generation evaluation benchmark",
+                    snippet="RAG benchmark dataset evaluation metrics.",
+                    source_type="academic_paper",
                     score=0.8,
                 ),
                 SourceCandidate(
-                    url="https://alpha.example/blog",
-                    title="Alpha launch",
-                    source_type="blog",
+                    url="/papers/rag-3.pdf",
+                    title="Retrieval-Augmented Generation recent advances",
+                    snippet="Recent advances in RAG systems.",
+                    source_type="academic_paper",
                     score=0.78,
                 ),
-            ],
-            "Alpha reviews comparison alternatives user feedback": [
-                SourceCandidate(
-                    url="https://reviews.example/alpha",
-                    title="Alpha reviews",
-                    source_type="review_platform",
-                    score=0.65,
-                )
             ],
         }
     )
 
     candidates = await make_agent(tmp_path).discover(request, plan, search)  # type: ignore[arg-type]
 
-    assert "Alpha reviews comparison alternatives user feedback" not in search.queries
+    assert "Retrieval-Augmented Generation benchmark dataset evaluation metric annotation" not in search.queries
     assert len(candidates) == 3
-    assert "https://reviews.example/alpha" not in {candidate.url for candidate in candidates}
+    assert {candidate.url for candidate in candidates} == {
+        "/papers/rag-1.pdf",
+        "/papers/rag-2.pdf",
+        "/papers/rag-3.pdf",
+    }
 
 
 def make_agent(tmp_path: Path) -> SourceResearchAgent:

@@ -6,9 +6,9 @@ mission: >
   and source hygiene; it does not analyze claims.
 research_principles:
   - Seed URLs are user-provided evidence hints and should be collected first.
-  - Search results are candidates, not facts.
+  - Local paper search results are candidates, not facts.
   - Failed fetches are recorded, not replaced with generated content.
-  - Official sources and third-party sources must remain distinguishable.
+  - Paper metadata, abstracts, and focused text must remain distinguishable.
 artifact_contract:
   writes:
     - sources/_index.jsonl
@@ -18,21 +18,21 @@ artifact_contract:
 quality_metrics:
   source_recall: number of unique accepted candidates
   fetch_success_rate: fetched_ok / source_candidates
-  source_mix: distribution across official/pricing/docs/changelog/review/blog/other
-  freshness_hint: whether source type or title suggests current product information
+  source_mix: distribution across academic_paper/seed_url/other
+  freshness_hint: whether venue, year, or title suggests current research relevance
 failure_modes:
-  - Search provider unavailable or rate-limited.
-  - SPA pages return navigation text without meaningful content.
+  - Local paper index or embeddings are unavailable.
+  - PDF extraction produced insufficient focused text.
   - Duplicated URLs consume max_sources budget.
-  - Review sources are mistaken for official product facts.
+  - Abstract-only snippets are mistaken for full-paper evidence.
 skills:
   - id: skill.source_discovery.v1
-    purpose: Execute Planner SourceTask tool calls and discover real public sources from seed URLs and live search results.
+    purpose: Execute Planner SourceTask tool calls and discover relevant papers from seed URLs and the local paper index.
     method:
       - Normalize and validate seed URLs.
-      - Run Planner-generated SourceTask queries through the configured SearchTool.
+      - Run Planner-generated SourceTask queries through LocalPaperSearchTool.
       - Record each SearchTool call with task_id, entity, dimension, intent, query, and expected_source_types.
-      - Merge seed and search results, deduplicate by normalized URL.
+      - Merge seed and local paper results, deduplicate by normalized path or URL.
       - Stop at max_sources to keep runs bounded.
     input_schema:
       source_tasks: SourceTask[]
@@ -44,19 +44,19 @@ skills:
     output_schema:
       candidates: SourceCandidate[]
     acceptance:
-      - Only http/https URLs are accepted.
-      - Search results are produced by real SearchTool providers, not invented by the LLM.
+      - Local file paths and http/https URLs are accepted when they point to real papers.
+      - Search results are produced by LocalPaperSearchTool, not invented by the LLM.
       - Duplicate normalized URLs are removed.
-      - Candidate includes query, title, snippet, source_type, and score when available.
+      - Candidate includes query, title, abstract/snippet, source_type, content, and score when available.
     rejection:
-      - Search result pages, login pages, or empty URLs.
+      - Empty paths, missing paper text, or non-paper metadata files.
       - Candidate with unsupported scheme.
   - id: skill.source_quality_scoring.v1
     purpose: Classify and score source usefulness before collection.
     method:
       - Infer source_type from URL and title.
-      - Prioritize official product, pricing, docs, changelog, enterprise/security pages.
-      - Keep review/blog/community sources, but treat them as lower-authority context.
+      - Prioritize academic_paper candidates with focused_text and high semantic score.
+      - Keep seed URLs when provided, but treat them as supplementary context.
       - Preserve score as a ranking signal, not as truth.
     input_schema:
       candidate: SourceCandidate
@@ -66,13 +66,14 @@ skills:
       rationale: string
     acceptance:
       - Score remains between 0 and 1.
-      - source_type uses backend-supported labels.
-      - Official and third-party source types are not merged.
+      - source_type uses backend-supported labels such as academic_paper or other.
+      - Paper-derived and seed-derived source types are not merged.
   - id: skill.web_collection.v1
-    purpose: Fetch pages, extract readable text, and store local snapshots.
+    purpose: Materialize paper text or fetch seed pages, then store local snapshots.
     method:
-      - Fetch with configured user agent, timeout, redirect following, and optional proxy.
-      - Extract main content with trafilatura and selectolax fallback.
+      - Persist provider-returned focused_text directly when available.
+      - Fetch seed pages with configured user agent, timeout, redirect following, and optional proxy.
+      - Extract main content with trafilatura and selectolax fallback only for web URLs.
       - Persist content even when analysis later fails.
       - Record ok/error status for every attempted document.
     input_schema:

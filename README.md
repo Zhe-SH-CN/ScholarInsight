@@ -1,56 +1,37 @@
-# CompeteInsight
+# ScholarInsight
 
-CompeteInsight is an evidence-first AI competitive analysis workspace. Through a multi-agent research pipeline, it turns a rough competitive research question into public sources, structured evidence, red-team-reviewed claims, competitor matrices, Markdown reports, and an AI Analysis Assistant for follow-up questions.
+ScholarInsight is an evidence-first academic paper reasoning workspace. It forked from an earlier competitive-analysis codebase, but the active product is now focused on research directions, local paper retrieval, structured innovation evidence, reasoning-pattern claims, red-team review, and cited Markdown reports.
 
-The project is built for the CIS AI-Powered Competitive Analysis Agent Challenge. At this stage, it is optimized more as a public demo and judging workspace than as a full enterprise-grade multi-tenant SaaS product.
+The main use case is turning an AI/ML research topic such as "RAG with Knowledge Graphs" into auditable artifacts: paper candidates, innovation evidence, paper-by-pattern matrices, reviewed claims, research-gap suggestions, and report files for later reuse.
 
 ## Core Capabilities
 
-* Start a competitive research run from a target product, competitors, research objective, analysis dimensions, and optional seed links.
-* The Planning Agent breaks the question down into research dimensions, search queries, source tasks, and quality rules.
-* The Search Agent calls public search sources such as Tavily, Exa, Zhihu, and DuckDuckGo fallback to execute batch queries and targeted gap-filling searches.
-* The Fetcher retrieves public webpage content and stores auditable `SourceDocument` records.
-* The Evidence Agent extracts structured evidence from real page content, preserving URL, quote, competitor, dimension, confidence, freshness, authority, and relevance.
-* The Analyze Agent aggregates evidence into claims, adds red-team risk review, and evaluates research gaps.
-* The Report Agent generates the summary, full report, methodology, competitor matrix, recommendations, and export files.
-* The AI Analysis Assistant supports follow-up questions based on the current research report, evidence, and claims.
-* Each run is stored as local artifacts under `data/runs`, making the research process traceable and auditable.
+* Start a research run from a target topic, optional seed papers, research goal, reasoning-pattern dimensions, and optional seed URLs or local paths.
+* Retrieve papers from the local paper index (`paper_index.json` + `embeddings.npy`) before falling back to any external search tools.
+* Extract structured evidence from paper text, including `reasoning_pattern`, `bottleneck`, `mechanism`, quote, confidence, and paper attribution.
+* Aggregate evidence into claims and run a strict red-team pass to mark unsupported, single-source, or over-stated conclusions.
+* Generate paper-pattern matrices, research recommendations, executive summaries, methodology notes, Markdown reports, JSON exports, and CSV evidence tables.
+* Resume interrupted runs from checkpoints and run batch topic processing through `scripts/batch_daemon.py`.
 
-## Technical Architecture
+## Reasoning Patterns
 
-![CompeteInsight Technical Architecture](cis-architecture.png)
+ScholarInsight uses 15 reasoning-pattern dimensions:
 
-The system uses a frontend-backend separated architecture:
+`gap_driven_reframing`, `cross_domain_synthesis`, `representation_shift`, `modular_pipeline_composition`, `data_evaluation_engineering`, `principled_probabilistic_modeling`, `formal_experimental_tightening`, `approximation_engineering`, `inference_time_control`, `structural_inductive_bias`, `multiscale_hierarchical_modeling`, `mechanistic_decomposition`, `adversary_modeling`, `numerics_systems_codesign`, and `data_centric_optimization`.
 
-* The frontend is a React + Vite single-page workspace responsible for login, research kickoff, Agent Event Log, Artifacts, Report, and AI Assistant interactions.
-* The backend is a FastAPI service responsible for authentication, run management, file serving, chat APIs, and agent orchestration.
-* `ResearchPipeline` connects five agent nodes: Planning, Search, Evidence, Analyze, and Report.
-* External data comes from Tavily, Exa, Zhihu, and DuckDuckGo fallback. Content extraction is powered by HTTPX, trafilatura, and selectolax.
-* The data layer uses a local artifact store, preserving complete research outputs in JSON, JSONL, Markdown, CSV, and related formats.
+## Architecture
 
-## Multi-Agent Orchestration
+The system keeps the original frontend/backend shape:
 
-![CompeteInsight Multi-Agent Orchestration](agent-architecture.png)
+![ScholarInsight Overall Architecture](scholarinsight-architecture.png)
 
-| Agent                      | Responsibility                                                                                                              | Key Outputs                                      |
-| -------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `ResearchPlanningAgent`    | Understands the user's research objective and breaks it down into competitors, dimensions, source tasks, and quality rules. | `ResearchPlan`, `queries`, `quality_rules`       |
-| `SourceResearchAgent`      | Executes batch queries, calls multiple search sources, and performs targeted supplementation based on coverage gaps.        | `SourceCandidate`, `SearchMemory`                |
-| `EvidenceStructuringAgent` | Extracts facts, quotes, sources, dimensions, competitor attribution, and confidence from real page content.                 | `Evidence`, Evidence index                       |
-| `AnalysisAndReviewAgent`   | Aggregates evidence into claims, performs red-team review, and evaluates information gaps.                                  | `Claim`, `RedTeamNote`, `ResearchFeedback`       |
-| `ReportComposerAgent`      | Generates readable competitive analysis reports, executive summaries, methodology notes, matrices, and export files.        | `Report`, `Matrix`, Recommendations, Battlecards |
+![ScholarInsight Agent Workflow Architecture](scholarinsight-agent-workflow.png)
 
-The pipeline includes a Coverage Gate. When evidence coverage is insufficient, source diversity is too low, claim confidence is weak, or clear counter-evidence risks exist, the system generates gap queries and returns to the Search Agent for targeted gap-filling. Only after the coverage quality gate is satisfied does the pipeline proceed to final report generation.
-
-## Tech Stack
-
-* Frontend: React 18, TypeScript, Vite, Framer Motion, Lucide icons.
-* Backend: FastAPI, Pydantic, Uvicorn, HTTPX.
-* LLM: OpenAI-compatible client with support for Ark, DeepSeek, Qwen, and related configurations.
-* Search: Tavily, Exa, Zhihu API, DuckDuckGo fallback.
-* Content extraction: HTTPX, selectolax, trafilatura.
-* Storage: local JSON, JSONL, Markdown, and CSV artifacts.
-* Deployment: Nginx, systemd, uv, pnpm.
+* Frontend: React + Vite workspace for login, research kickoff, event log, artifact inspection, report viewing, and follow-up chat.
+* Backend: FastAPI service for auth, run management, local artifact serving, chat APIs, and agent orchestration.
+* Pipeline: `ResearchPlanningAgent -> SourceResearchAgent -> EvidenceStructuringAgent -> AnalysisAndReviewAgent -> ReportComposerAgent`.
+* Retrieval: `LocalPaperSearchTool` loads the local paper index and embedding matrix, returning `academic_paper` candidates.
+* Storage: every run is stored under `data/runs` as JSON, JSONL, Markdown, and CSV artifacts.
 
 ## Project Structure
 
@@ -63,30 +44,33 @@ backend/
     orchestrator/    # ResearchPipeline orchestration layer
     repositories/    # Local run / evidence repositories
     schemas/         # Pydantic data models
-    tools/           # Search and content-fetching tools
+    tools/           # Local paper search and content-fetching tools
+  data/
+    paper_index.json # Local paper metadata/text index
+    embeddings.npy   # Local paper embedding matrix
 frontend/
   src/
     App.tsx
     styles/global.css
-skills/              # Skill metadata used by the Agent workspace
-scripts/             # Deployment and initialization scripts
-diagrams/            # Architecture diagrams used in README and submission docs
-data/                # Local run artifacts; production deployment does not overwrite server data
+scripts/
+  batch_daemon.py
+  build_paper_index.py
+  build_embeddings.py
+skills/
+  *.yaml
 ```
 
 ## Local Development
 
-### Backend
+Backend:
 
 ```bash
 cd backend
 uv sync
-uv run uvicorn cg.main:app --reload
+uv run uvicorn cg.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The default API URL is `http://localhost:8000`.
-
-### Frontend
+Frontend:
 
 ```bash
 cd frontend
@@ -94,64 +78,36 @@ pnpm install
 pnpm dev
 ```
 
-The default frontend URL is `http://localhost:5173`.
+Batch daemon smoke test:
 
-## Environment Variables
-
-Configure at least one LLM provider in `backend/.env`.
-
-```env
-CG_LLM_PROVIDER=ark
-CG_LLM_MODEL=your-model-name
-ARK_API_KEY=your-ark-key
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-
-TAVILY_API_KEY=your-tavily-key
-EXA_API_KEY=your-exa-key
-ZHIHU_API_KEY=your-zhihu-key
-
-CG_AUTH_USERNAME=your-demo-user
-CG_AUTH_PASSWORD=change-me
-CG_AUTH_SECRET=replace-with-a-long-random-secret
+```bash
+cd backend
+uv run python ../scripts/batch_daemon.py --smoke-test
 ```
 
-Supported LLM API keys include `ARK_API_KEY`, `DEEPSEEK_API_KEY`, and `QWEN_API_KEY`.
+Do not start the full daemon unless you intend to consume MiMo tokens continuously.
 
-## Login and User Isolation
+## Environment
 
-The current demo uses a lightweight cookie-session login mechanism:
+Copy `backend/.env.example` to `backend/.env` and configure at least one OpenAI-compatible LLM provider. The intended ScholarInsight setup uses MiMo for main analysis and may use Gemini for red-team review.
 
-* `POST /api/login`
-* `POST /api/logout`
-* `GET /api/me`
+Required local paper paths:
+
+```env
+SCHOLAR_PAPER_INDEX_PATH=/home/zsz/Mimo/ScholarInsight/backend/data/paper_index.json
+SCHOLAR_LOCAL_PAPERS_DIR=/home/zsz/papers
+```
 
 ## Testing
 
 ```bash
 cd backend
-uv run pytest
+uv run python -m pytest
 
 cd ../frontend
 pnpm build
 ```
 
-## Demo Run Metrics
+## Notes
 
-The hosted demo currently includes a completed sample run for the AI coding assistant landscape:
-
-| Metric              | Value |
-| ------------------- | ----: |
-| Source candidates   |   282 |
-| Sources fetched     |   276 |
-| Structured evidence |   479 |
-| Claims              |    50 |
-| Verified claims     |    33 |
-| Challenged claims   |    17 |
-| Matrix cells        |    24 |
-| Coverage score      | 97.3% |
-
-## Roadmap
-
-* Build an Evidence Graph to visualize `Source -> Evidence -> Claim -> Recommendation`.
-* Add report versioning, diff, adoption, and rollback workflows.
-* Add research templates for PMs, sales teams, investors, strategy teams, battlecards, and more.
+Some schema properties still accept legacy product-analysis payload fields. They are compatibility shims only; new code and UI should use `target_topic` and `seed_papers`.

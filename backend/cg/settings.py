@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     cg_llm_provider: str = "deepseek"
     cg_llm_model: str = "deepseek-chat"
     cg_llm_temperature: float = Field(default=0.2, ge=0, le=2)
-    cg_llm_timeout_seconds: int = Field(default=90, ge=10, le=300)
+    cg_llm_timeout_seconds: int = Field(default=300, ge=10, le=600)
     cg_llm_min_interval_seconds: float = Field(default=1.2, ge=0, le=30)
     cg_llm_max_retries: int = Field(default=3, ge=0, le=8)
     cg_llm_rate_limit_cooldown_seconds: float = Field(default=12.0, ge=1, le=120)

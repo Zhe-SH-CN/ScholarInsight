@@ -1,6 +1,6 @@
 param(
     [string]$HostName = "satmon",
-    [string]$RemoteDir = "/mnt/competegraph",
+    [string]$RemoteDir = "/mnt/scholarinsight",
     [int]$BackendPort = 18000,
     [int]$FrontendPort = 18080,
     [string]$PublicHost = "8.136.33.172"
@@ -10,10 +10,10 @@ $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $Stamp = Get-Date -Format "yyyyMMdd_HHmmss"
-$Archive = Join-Path $env:TEMP "competegraph_$Stamp.tar.gz"
-$RemoteArchive = "/tmp/competegraph_$Stamp.tar.gz"
-$RemoteInstaller = "/tmp/install_competegraph_remote_$Stamp.sh"
-$Installer = Join-Path $PSScriptRoot "install_competegraph_remote.sh"
+$Archive = Join-Path $env:TEMP "scholarinsight_$Stamp.tar.gz"
+$RemoteArchive = "/tmp/scholarinsight_$Stamp.tar.gz"
+$RemoteInstaller = "/tmp/install_scholarinsight_remote_$Stamp.sh"
+$Installer = Join-Path $PSScriptRoot "install_scholarinsight_remote.sh"
 
 function Assert-Command($Name) {
     if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {

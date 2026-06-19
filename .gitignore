@@ -1,5 +1,5 @@
 # ============================================================
-# CompeteGraph - .gitignore
+# ScholarInsight - .gitignore
 # ============================================================
 
 # --- Python ---
@@ -71,6 +71,11 @@ data/
 # --- Logs ---
 *.log
 logs/
+
+# --- Local planning files ---
+task_plan.md
+findings.md
+progress.md
 
 # --- Local generated artifacts ---
 .tmp_screens/

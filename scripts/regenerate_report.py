@@ -21,9 +21,8 @@ from cg.llm import LLMClient  # noqa: E402
 from cg.orchestrator.pipeline import build_evidence_csv  # noqa: E402
 from cg.repositories.base import atomic_write_json, write_text  # noqa: E402
 from cg.schemas.research import (  # noqa: E402
-    BattlecardItem,
     Claim,
-    CompetitorMatrix,
+    PaperPatternMatrix,
     Evidence,
     ObservabilitySnapshot,
     OpportunityRecommendation,
@@ -73,14 +72,10 @@ async def main() -> None:
     metrics = RunMetrics(**status.get("metrics", {}))
     evidence = load_full_evidence(run_dir)
     claims = [Claim(**row) for row in read_jsonl(run_dir / "claims" / "_index.jsonl")]
-    matrix = CompetitorMatrix(**read_json(run_dir / "exports" / "matrix.json"))
+    matrix = PaperPatternMatrix(**read_json(run_dir / "exports" / "matrix.json"))
     recommendations = [
         OpportunityRecommendation(**row)
         for row in read_json(run_dir / "exports" / "recommendations.json")
-    ]
-    battlecards = [
-        BattlecardItem(**row)
-        for row in read_json(run_dir / "exports" / "battlecards.json")
     ]
     observability = ObservabilitySnapshot(**read_json(run_dir / "exports" / "observability.json"))
 
@@ -96,7 +91,6 @@ async def main() -> None:
     artifacts = {
         "matrix": matrix,
         "recommendations": recommendations,
-        "battlecards": battlecards,
         "observability": observability,
     }
 
@@ -132,7 +126,6 @@ async def main() -> None:
             "claims": claims,
             "matrix": matrix,
             "recommendations": recommendations,
-            "battlecards": battlecards,
             "observability": observability,
             "evidence_ids": [ev.evidence_id for ev in evidence],
         },

@@ -22,7 +22,7 @@ class LocalPaperIndex:
         self._model = None
 
         if Path(index_path).exists():
-            with open(index_path, "r") as f:
+            with open(index_path, "r", encoding="utf-8") as f:
                 self.papers = json.load(f)
 
         # 加载 embeddings
@@ -63,6 +63,7 @@ class LocalPaperIndex:
                     source_type="academic_paper",
                     query=query,
                     score=min(max(score, 0.0), 1.0),
+                    source_provider="local_papers",
                 ))
             return results
 
@@ -96,6 +97,7 @@ class LocalPaperIndex:
                     source_type="academic_paper",
                     query=query,
                     score=min(score, 1.0),
+                    source_provider="local_papers",
                 ))
         return results
 

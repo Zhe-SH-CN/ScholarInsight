@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 DEFAULT_DIMENSIONS = [
@@ -62,6 +62,22 @@ class ResearchRequest(BaseModel):
     max_sources_per_query: int = Field(default=3, ge=1, le=8)
     auto_discover_sources: bool = True
     max_search_rounds: int = Field(default=3, ge=1, le=8)
+    max_research_loops: int | None = Field(default=None, ge=1, le=8)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_competeinsight_fields(cls, value: Any) -> Any:
+        """Accept legacy payloads without losing the user's topic."""
+        if isinstance(value, dict):
+            data = dict(value)
+            if not data.get("target_topic") and data.get("target_product"):
+                data["target_topic"] = data["target_product"]
+            if not data.get("topic_description") and data.get("product_description"):
+                data["topic_description"] = data["product_description"]
+            if not data.get("seed_papers") and data.get("competitors"):
+                data["seed_papers"] = data["competitors"]
+            return data
+        return value
 
     @field_validator("seed_papers", "analysis_dimensions", mode="before")
     @classmethod
@@ -76,6 +92,21 @@ class ResearchRequest(BaseModel):
         if isinstance(value, str):
             return [item.strip() for item in value.splitlines() if item.strip()]
         return value
+
+    @property
+    def target_product(self) -> str:
+        """Compatibility for old tests/manifests."""
+        return self.target_topic
+
+    @property
+    def product_description(self) -> str:
+        """Compatibility for old tests/manifests."""
+        return self.topic_description
+
+    @property
+    def competitors(self) -> list[str]:
+        """Compatibility for old tests/manifests."""
+        return self.seed_papers
 
 
 class QuickExtractRequest(BaseModel):
@@ -102,10 +133,20 @@ class SourceTask(BaseModel):
     task_id: str
     entity: str
     dimension: str = "other"
-    intent: Literal["official", "pricing", "docs", "changelog", "review", "enterprise", "news", "comparison"] = "official"
+    intent: Literal["official", "docs", "review", "news", "comparison", "survey", "benchmark"] = "official"
     query: str
     expected_source_types: list[str] = Field(default_factory=list)
     rationale: str = ""
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def migrate_legacy_intent(cls, value: Any) -> str:
+        legacy_map = {
+            "pricing": "comparison",
+            "enterprise": "official",
+            "changelog": "news",
+        }
+        return legacy_map.get(str(value or "official"), str(value or "official"))
 
 
 class ResearchPlan(BaseModel):
@@ -118,6 +159,15 @@ class ResearchPlan(BaseModel):
     quality_rules: list[str] = Field(default_factory=list)
     notes: str = ""
     planned_by: str = "ChiefResearchPlanner"
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_plan_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not value.get("papers") and value.get("competitors"):
+            data = dict(value)
+            data["papers"] = data["competitors"]
+            return data
+        return value
 
 
 class SourceDocument(BaseModel):
@@ -182,6 +232,9 @@ class EvidenceSummary(BaseModel):
     source_type: str
     confidence: float
     fetched_at: datetime
+    reasoning_pattern: str = ""
+    bottleneck: str = ""
+    mechanism: str = ""
 
 
 class RedTeamNote(BaseModel):
@@ -262,6 +315,15 @@ class RunStatus(BaseModel):
     warnings: list[str] = Field(default_factory=list)
     error: str | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_status_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict) and not value.get("target_topic") and value.get("target_product"):
+            data = dict(value)
+            data["target_topic"] = data["target_product"]
+            return data
+        return value
+
 
 class EvidenceLink(BaseModel):
     evidence_id: str
@@ -310,7 +372,7 @@ class OpportunityRecommendation(BaseModel):
     title: str
     recommendation: str
     priority: Literal["low", "medium", "high"] = "medium"
-    target_audience: Literal["executive", "pm", "sales", "investor", "general"] = "pm"
+    target_audience: Literal["researcher", "advisor", "student", "general"] = "researcher"
     rationale: str
     expected_value: str
     based_on_claim_ids: list[str] = Field(default_factory=list)
@@ -318,6 +380,13 @@ class OpportunityRecommendation(BaseModel):
     next_steps: list[str] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     confidence: float = Field(default=0.5, ge=0, le=1)
+
+    @field_validator("target_audience", mode="before")
+    @classmethod
+    def migrate_legacy_audience(cls, value: Any) -> str:
+        if value in {"executive", "pm", "sales", "investor"}:
+            return "researcher"
+        return value or "researcher"
 
 
 class QualityGate(BaseModel):

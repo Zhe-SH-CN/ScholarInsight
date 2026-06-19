@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import asyncio
+import json
 import re
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -59,83 +60,163 @@ from cg.tools.search import SearchTool, classify_source
 from cg.tools.local_paper_search import LocalPaperSearchTool
 
 
+def atomic_write_json_sync(path: Path, data: Any) -> None:
+    """Synchronous atomic JSON write for checkpoint saving."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+    tmp.replace(path)
+
+
 DIMENSION_KEYWORDS: dict[str, list[str]] = {
-    "positioning": [
-        "position",
-        "mission",
-        "built for",
-        "designed for",
-        "target",
-        "developer",
-        "定位",
-        "面向",
-        "适合",
+    "gap_driven_reframing": [
+        "gap",
+        "limitation",
+        "challenge",
+        "bottleneck",
+        "reframe",
+        "problem",
+        "痛点",
+        "瓶颈",
+        "重构",
     ],
-    "feature": [
-        "feature",
-        "capability",
-        "code",
+    "cross_domain_synthesis": [
+        "cross-domain",
+        "integrate",
+        "combine",
+        "hybrid",
+        "knowledge graph",
+        "multimodal",
+        "跨领域",
+        "融合",
+    ],
+    "representation_shift": [
+        "representation",
+        "embedding",
+        "latent",
+        "encode",
+        "token",
+        "graph representation",
+        "表征",
+        "嵌入",
+    ],
+    "modular_pipeline_composition": [
+        "pipeline",
+        "module",
+        "component",
+        "framework",
         "agent",
-        "completion",
-        "context",
-        "功能",
-        "能力",
-        "代码",
-        "智能体",
+        "tool",
+        "模块",
+        "管线",
     ],
-    "pricing": [
-        "pricing",
-        "price",
-        "free",
-        "pro",
-        "team",
-        "enterprise",
-        "$",
-        "billing",
-        "subscription",
-        "资源需求",
-        "价格",
-        "免费",
-        "订阅",
+    "data_evaluation_engineering": [
+        "benchmark",
+        "dataset",
+        "evaluation",
+        "metric",
+        "annotation",
+        "test set",
+        "评测",
+        "数据集",
     ],
-    "user_voice": [
-        "review",
-        "customer",
-        "user",
-        "feedback",
-        "community",
-        "rating",
-        "用户",
-        "评价",
-        "反馈",
-        "社区",
+    "principled_probabilistic_modeling": [
+        "probabilistic",
+        "bayesian",
+        "uncertainty",
+        "distribution",
+        "likelihood",
+        "概率",
+        "不确定性",
     ],
-    "enterprise": [
-        "enterprise",
-        "security",
-        "privacy",
-        "admin",
-        "sso",
-        "compliance",
-        "team",
-        "企业",
-        "安全",
-        "隐私",
-        "权限",
-        "团队",
+    "formal_experimental_tightening": [
+        "theorem",
+        "proof",
+        "ablation",
+        "controlled experiment",
+        "formal",
+        "rigorous",
+        "理论",
+        "消融",
     ],
-    "strategy": [
-        "launch",
-        "roadmap",
-        "market",
-        "partnership",
-        "workflow",
-        "productivity",
-        "发布",
-        "路线图",
-        "市场",
-        "机会",
+    "approximation_engineering": [
+        "approximation",
+        "heuristic",
+        "efficient",
+        "scalable",
+        "sampling",
+        "近似",
+        "启发式",
     ],
+    "inference_time_control": [
+        "inference-time",
+        "decoding",
+        "test-time",
+        "planning",
+        "search",
+        "self-correction",
+        "推理时",
+        "解码",
+    ],
+    "structural_inductive_bias": [
+        "inductive bias",
+        "structure",
+        "graph",
+        "hierarchy",
+        "constraint",
+        "结构",
+        "归纳偏置",
+    ],
+    "multiscale_hierarchical_modeling": [
+        "hierarchical",
+        "multi-scale",
+        "coarse-to-fine",
+        "level",
+        "granularity",
+        "分层",
+        "多尺度",
+    ],
+    "mechanistic_decomposition": [
+        "mechanism",
+        "decompose",
+        "interpretability",
+        "causal mechanism",
+        "analysis",
+        "机制",
+        "分解",
+    ],
+    "adversary_modeling": [
+        "adversarial",
+        "robust",
+        "attack",
+        "defense",
+        "red-team",
+        "jailbreak",
+        "对抗",
+        "鲁棒",
+    ],
+    "numerics_systems_codesign": [
+        "system",
+        "hardware",
+        "kernel",
+        "quantization",
+        "latency",
+        "throughput",
+        "系统",
+        "数值",
+    ],
+    "data_centric_optimization": [
+        "data-centric",
+        "data selection",
+        "curation",
+        "augmentation",
+        "synthetic data",
+        "quality",
+        "数据中心",
+        "数据选择",
+    ],
+    "other": ["method", "result", "contribution", "approach", "方法", "结果", "贡献"],
 }
 
 
@@ -152,6 +233,27 @@ class ResearchPipeline:
         self.llm = LLMClient(self.settings)
         # Gemini 红队 LLM（独立配置）
         self._gemini_llm: LLMClient | None = None
+
+    def _checkpoint_path(self, run_id: str) -> Path:
+        return self.runs.run_dir(run_id) / "checkpoint.json"
+
+    def _save_checkpoint(self, run_id: str, state: dict) -> None:
+        path = self._checkpoint_path(run_id)
+        atomic_write_json_sync(path, state)
+
+    def _load_checkpoint(self, run_id: str) -> dict | None:
+        path = self._checkpoint_path(run_id)
+        if path.exists():
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        return None
+
+    def _clear_checkpoint(self, run_id: str) -> None:
+        path = self._checkpoint_path(run_id)
+        if path.exists():
+            path.unlink()
 
     @property
     def gemini_llm(self) -> LLMClient:
@@ -195,7 +297,7 @@ class ResearchPipeline:
             await self.runs.save_status(status)
 
             ctx = self.agent_context(run_id)
-            max_loops = self.settings.cg_max_research_loops
+            max_loops = request.max_research_loops or self.settings.cg_max_research_loops
 
             # ── 外层循环：Planning → Search → Analysis（可多轮）──
             feedback: ResearchFeedback | None = None
@@ -217,6 +319,7 @@ class ResearchPipeline:
                     )
                     await atomic_write_json(self.runs.run_dir(run_id) / "plan.json", plan)
                     await atomic_write_json(self.runs.run_dir(run_id) / "dag.json", build_dag_snapshot(plan))
+                    self._save_checkpoint(run_id, {"step": "source_research", "loop_round": loop_round, "max_loops": max_loops})
 
                 # ── Source Research（ReAct 自主搜索）──
                 async with self.node(run_id, status, "SourceResearchAgent",
@@ -292,6 +395,7 @@ class ResearchPipeline:
                     metrics.sources_failed = len([d for d in all_documents if not d.ok])
                     status.metrics = metrics
                     await self.runs.save_status(status)
+                    self._save_checkpoint(run_id, {"step": "evidence", "loop_round": loop_round, "max_loops": max_loops})
 
                 # ── Evidence Structuring ──
                 async with self.node(run_id, status, "EvidenceStructuringAgent",
@@ -308,6 +412,7 @@ class ResearchPipeline:
                     await self.runs.save_status(status)
                     if not all_evidence:
                         status.warnings.append("抓取完成，但没有抽取到有效 Evidence。")
+                    self._save_checkpoint(run_id, {"step": "analysis", "loop_round": loop_round, "max_loops": max_loops})
 
                 # ── Analysis & Review（含缺口评估）──
                 async with self.node(run_id, status, "AnalysisAndReviewAgent",
@@ -347,6 +452,12 @@ class ResearchPipeline:
                         {"loop_round": loop_round, "needs_more": feedback.needs_more_research,
                          "gap_count": len(feedback.gaps), "coverage": coverage_score},
                     )
+
+                # 分析完成，保存 checkpoint（标记为 synthesis 或下一轮 planning）
+                if feedback.needs_more_research and loop_round < max_loops and len(all_candidates) < request.max_sources:
+                    self._save_checkpoint(run_id, {"step": "planning", "loop_round": loop_round + 1, "max_loops": max_loops})
+                else:
+                    self._save_checkpoint(run_id, {"step": "synthesis", "loop_round": loop_round, "max_loops": max_loops})
 
                 # 是否继续循环
                 if not feedback.needs_more_research or loop_round >= max_loops or len(all_candidates) >= request.max_sources:
@@ -436,10 +547,262 @@ class ResearchPipeline:
             status.finished_at = datetime.now(timezone.utc)
             status.metrics = metrics
             await self.runs.save_status(status)
+            self._clear_checkpoint(run_id)
             await self.trace(
                 run_id, "ReportComposerAgent", "complete", "completed",
                 "运行完成", metrics.model_dump()
             )
+        except RunStopped:
+            status = await self.runs.mark_stopped(run_id, status)
+            await self.trace(run_id, "Pipeline", "complete", "stopped", "Stopped by user")
+        except Exception as exc:
+            status.status = "failed"
+            status.current_stage = "Failed"
+            status.finished_at = datetime.now(timezone.utc)
+            status.error = str(exc)
+            status.metrics = metrics
+            await self.runs.save_status(status)
+            await self.trace(run_id, "Pipeline", "error", "failed", str(exc))
+
+    async def resume(self, request: ResearchRequest, run_id: str) -> None:
+        """Resume a run from its last checkpoint."""
+        checkpoint = self._load_checkpoint(run_id)
+        if not checkpoint:
+            # No checkpoint, start fresh
+            await self.run(request, run_id)
+            return
+
+        status = await self.runs.load_status(run_id)
+        metrics = status.metrics or RunMetrics()
+
+        if not self.llm.is_configured:
+            status.status = "failed"
+            status.current_stage = "Failed"
+            status.error = "LLM API Key 未配置"
+            await self.runs.save_status(status)
+            return
+
+        try:
+            status.status = "running"
+            await self.runs.save_status(status)
+
+            ctx = self.agent_context(run_id)
+            max_loops = checkpoint.get(
+                "max_loops",
+                request.max_research_loops or self.settings.cg_max_research_loops,
+            )
+            step = checkpoint.get("step", "planning")
+            loop_round = checkpoint.get("loop_round", 1)
+
+            # Reconstruct state from persisted files
+            run_dir = self.runs.run_dir(run_id)
+            plan: ResearchPlan | None = None
+            plan_path = run_dir / "plan.json"
+            if plan_path.exists():
+                plan = ResearchPlan(**json.loads(plan_path.read_text(encoding="utf-8")))
+
+            # Reconstruct candidates from sources/_index.jsonl
+            all_candidates: list[SourceCandidate] = []
+            sources_index = run_dir / "sources" / "_index.jsonl"
+            if sources_index.exists():
+                for line in sources_index.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        try:
+                            all_candidates.append(SourceCandidate(**json.loads(line)))
+                        except Exception:
+                            pass
+
+            # Reconstruct documents from documents/_index.jsonl
+            all_documents: list[SourceDocument] = []
+            docs_index = run_dir / "documents" / "_index.jsonl"
+            if docs_index.exists():
+                for line in docs_index.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        try:
+                            all_documents.append(SourceDocument(**json.loads(line)))
+                        except Exception:
+                            pass
+
+            # Reconstruct evidence from evidence/*.json
+            all_evidence: list[Evidence] = []
+            evidence_repo = EvidenceRepository(run_dir)
+            all_evidence = await evidence_repo.load_all()
+
+            # Reconstruct search memory
+            search_memory = SearchMemory(
+                seen_urls=[c.url for c in all_candidates],
+                seen_queries=unique_strings([c.query for c in all_candidates if c.query]),
+                remaining_source_slots=max(0, request.max_sources - len(all_candidates)),
+                resource_limit_reached=len(all_candidates) >= request.max_sources,
+                loop_round=loop_round,
+            )
+
+            reviewed_claims: list[Claim] = []
+            feedback: ResearchFeedback | None = None
+
+            await self.trace(
+                run_id, "Pipeline", "progress", "resumed",
+                f"从 checkpoint 恢复：step={step}, loop_round={loop_round}, "
+                f"candidates={len(all_candidates)}, documents={len(all_documents)}, evidence={len(all_evidence)}",
+                {"step": step, "loop_round": loop_round},
+            )
+
+            for lr in range(loop_round, max_loops + 1):
+                await self.check_stop(run_id)
+                loop_label = f"第 {lr} 轮"
+
+                # ── Planning ──
+                if lr == loop_round and step not in ("planning",):
+                    # Already done this round's planning, skip
+                    pass
+                else:
+                    async with self.node(run_id, status, "ResearchPlanningAgent",
+                                         f"{loop_label}：规划研究范围、搜索策略和质量规则"):
+                        plan = await ResearchPlanningAgent(ctx).plan(
+                            request, feedback=feedback, loop_round=lr
+                        )
+                        await atomic_write_json(run_dir / "plan.json", plan)
+                        await atomic_write_json(run_dir / "dag.json", build_dag_snapshot(plan))
+                        self._save_checkpoint(run_id, {"step": "source_research", "loop_round": lr, "max_loops": max_loops})
+
+                # ── Source Research ──
+                if lr == loop_round and step in ("evidence", "analysis", "synthesis"):
+                    # Already done, skip
+                    pass
+                else:
+                    async with self.node(run_id, status, "SourceResearchAgent",
+                                         f"{loop_label}：两阶段内容搜索"):
+                        source_agent = SourceResearchAgent(ctx)
+                        candidates = await source_agent.discover(
+                            request, plan, self.search,
+                            memory=search_memory, feedback=feedback, loop_round=lr,
+                        )
+                        existing_urls = {c.url for c in all_candidates}
+                        remaining_slots = max(0, request.max_sources - len(all_candidates))
+                        new_candidates = [c for c in candidates if c.url not in existing_urls][:remaining_slots]
+                        all_candidates.extend(new_candidates)
+                        search_memory = SearchMemory(
+                            seen_urls=[c.url for c in all_candidates],
+                            seen_queries=unique_strings([c.query for c in all_candidates if c.query]),
+                            remaining_source_slots=max(0, request.max_sources - len(all_candidates)),
+                            resource_limit_reached=len(all_candidates) >= request.max_sources,
+                            loop_round=lr,
+                            feedback_message=feedback.message if feedback else "",
+                        )
+                        metrics.source_candidates = len(all_candidates)
+                        await self.save_candidates(run_id, new_candidates)
+                        new_documents = await self.materialize_search_documents(run_id, new_candidates)
+                        fallback_candidates = [
+                            c for c in sorted(new_candidates, key=lambda c: c.score, reverse=True)
+                            if not c.content.strip()
+                        ][: max(0, min(request.max_sources, 20))]
+                        if fallback_candidates:
+                            fetched = await source_agent.collect(
+                                fallback_candidates, self.fetcher,
+                                lambda c, p: self.save_document(run_id, c, p),
+                                lambda ph, es, m, pl=None: self.trace(run_id, "SourceResearchAgent", ph, es, m, pl),
+                            )
+                            new_documents.extend(fetched)
+                        all_documents.extend(new_documents)
+                        metrics.sources_fetched = len([d for d in all_documents if d.ok])
+                        metrics.sources_failed = len([d for d in all_documents if not d.ok])
+                        status.metrics = metrics
+                        await self.runs.save_status(status)
+                        self._save_checkpoint(run_id, {"step": "evidence", "loop_round": lr, "max_loops": max_loops})
+
+                # ── Evidence Structuring ──
+                if lr == loop_round and step in ("analysis", "synthesis"):
+                    pass
+                else:
+                    async with self.node(run_id, status, "EvidenceStructuringAgent",
+                                         f"{loop_label}：从已采集正文中抽取结构化 Evidence"):
+                        new_evidence = await self.extract_and_save_evidence(
+                            run_id, request, plan, new_documents, existing_evidence=all_evidence
+                        )
+                        existing_ev_ids = {ev.evidence_id for ev in all_evidence}
+                        unique_new = [ev for ev in new_evidence if ev.evidence_id not in existing_ev_ids]
+                        all_evidence.extend(unique_new)
+                        metrics.evidence_count = len(all_evidence)
+                        status.metrics = metrics
+                        await self.runs.save_status(status)
+                        self._save_checkpoint(run_id, {"step": "analysis", "loop_round": lr, "max_loops": max_loops})
+
+                # ── Analysis & Review ──
+                if lr == loop_round and step == "synthesis":
+                    pass
+                else:
+                    async with self.node(run_id, status, "AnalysisAndReviewAgent",
+                                         f"{loop_label}：生成 Claim、执行 Red Team 审查并评估证据缺口"):
+                        claims = await self.generate_claims(run_id, all_evidence, request)
+                        metrics.claim_count = len(claims)
+                        reviewed_claims = await self.red_team(run_id, claims, all_evidence)
+                        metrics.verified_claim_count = len(
+                            [c for c in reviewed_claims if c.verification_status == "verified"]
+                        )
+                        metrics.challenged_claim_count = len(
+                            [c for c in reviewed_claims if c.verification_status != "verified"]
+                        )
+                        status.metrics = metrics
+                        await self.runs.save_status(status)
+
+                        dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
+                        papers = [request.target_topic]
+                        interim_matrix = build_paper_pattern_matrix(all_evidence, papers, dimensions)
+                        coverage_score = sum(interim_matrix.coverage_by_dimension.values()) / max(
+                            1, len(interim_matrix.coverage_by_dimension)
+                        )
+
+                        analysis_agent = AnalysisAndReviewAgent(ctx)
+                        feedback = await analysis_agent.assess_gaps(
+                            request, all_evidence, reviewed_claims, lr, coverage_score
+                        )
+
+                # Loop decision
+                if not feedback.needs_more_research or lr >= max_loops or len(all_candidates) >= request.max_sources:
+                    break
+                search_memory = SearchMemory(
+                    seen_urls=[c.url for c in all_candidates],
+                    seen_queries=unique_strings([c.query for c in all_candidates if c.query]),
+                    remaining_source_slots=max(0, request.max_sources - len(all_candidates)),
+                    resource_limit_reached=len(all_candidates) >= request.max_sources,
+                    loop_round=lr + 1,
+                    feedback_message=feedback.message if feedback else "",
+                )
+
+            # ── Synthesis & Report ──
+            self._save_checkpoint(run_id, {"step": "synthesis", "loop_round": loop_round, "max_loops": max_loops})
+            async with self.node(run_id, status, "AnalysisAndReviewAgent", "整合全轮次结果，合成分析资产"):
+                artifacts = await AnalysisAndReviewAgent(ctx).synthesize(
+                    request, plan, all_evidence, reviewed_claims, metrics,
+                    status.started_at,
+                    matrix_builder=build_paper_pattern_matrix,
+                    recommendations_builder=build_recommendations,
+                    graph_builder=build_evidence_graph,
+                    observability_builder=build_observability,
+                    average_fn=average,
+                    unique_strings_fn=unique_strings,
+                )
+                await self.save_artifacts(run_id, artifacts)
+                metrics.matrix_cell_count = len(artifacts["matrix"].cells)
+                metrics.recommendation_count = len(artifacts["recommendations"])
+                metrics.average_evidence_confidence = artifacts["average_evidence_confidence"]
+                metrics.coverage_score = artifacts["observability"].evidence_coverage_score
+                status.metrics = metrics
+                await self.runs.save_status(status)
+
+            async with self.node(run_id, status, "ReportComposerAgent", "生成本地 Markdown/JSON/CSV 交付文件"):
+                await self.write_report(
+                    run_id, request, all_evidence, reviewed_claims, metrics,
+                    artifacts["matrix"], artifacts["recommendations"], artifacts["observability"],
+                )
+
+            status.status = "completed"
+            status.current_stage = "Completed"
+            status.finished_at = datetime.now(timezone.utc)
+            status.metrics = metrics
+            await self.runs.save_status(status)
+            self._clear_checkpoint(run_id)
+            await self.trace(run_id, "ReportComposerAgent", "complete", "completed", "运行完成", metrics.model_dump())
         except RunStopped:
             status = await self.runs.mark_stopped(run_id, status)
             await self.trace(run_id, "Pipeline", "complete", "stopped", "Stopped by user")
@@ -1154,7 +1517,7 @@ def build_recommendations(
     request: ResearchRequest,
     claims: list[Claim],
     evidence: list[Evidence],
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
 ) -> list[OpportunityRecommendation]:
     recommendations: list[OpportunityRecommendation] = []
     by_dimension: dict[str, list[Claim]] = defaultdict(list)
@@ -1171,7 +1534,7 @@ def build_recommendations(
     )
     target_weak = target_profile.weak_or_unknown_dimensions if target_profile else []
 
-    strategic_claims = by_dimension.get("strategy", []) or claims[:3]
+    strategic_claims = claims[:3]
     if strategic_claims:
         evidence_ids = unique_strings(
             [ev_id for claim in strategic_claims[:3] for ev_id in claim.supporting_evidence_ids]
@@ -1185,13 +1548,13 @@ def build_recommendations(
                     "每个主题都绑定 Evidence、Claim 与 Red Team 审查结果。"
                 ),
                 priority="high",
-                target_audience="executive",
+                target_audience="researcher",
                 rationale=best_claim_text(strategic_claims[0]),
                 expected_value="让论文分析从一次性报告变成可审计的研究决策输入。",
                 based_on_claim_ids=[claim.claim_id for claim in strategic_claims[:3]],
                 evidence_ids=evidence_ids[:8],
                 next_steps=[
-                    "选择一条高置信度战略 Claim 进入研究方向评审",
+                    "选择一条高置信度 Claim 进入研究方向评审",
                     "对 Red Team 标记的低证据结论安排二次采集",
                     "将关键 Evidence 纳入汇报附录，避免无来源判断",
                 ],
@@ -1216,7 +1579,7 @@ def build_recommendations(
                     "特别是代表性论文、最新进展和方法创新论文。"
                 ),
                 priority="medium" if evidence_ids else "high",
-                target_audience="pm",
+                target_audience="researcher",
                 rationale=f"该维度当前覆盖度为 {matrix.coverage_by_dimension.get(dimension, 0):.0%}，仍有补证空间。",
                 expected_value="提升报告可信度，并降低 Red Team 对关键结论的挑战率。",
                 evidence_ids=evidence_ids,
@@ -1240,7 +1603,7 @@ def build_recommendations(
                     "建议补充相关论文和最新进展。"
                 ),
                 priority="high",
-                target_audience="pm",
+                target_audience="researcher",
                 rationale="论文分析不仅看研究方向是否有进展，也看公开论文是否能形成清晰认知。",
                 expected_value="提升研究叙事一致性，让后续分析更容易复用同一套材料。",
                 evidence_ids=target_profile.evidence_ids[:6] if target_profile else [],
@@ -1543,7 +1906,7 @@ def evidence_coverage_counts(
 
 
 def evidence_cell_sufficient(count: int) -> bool:
-    # 严一点：同一产品×维度至少 5 条 Evidence 后才跳过后续同格文档。
+    # 严一点：同一论文/方向×推理模式至少 5 条 Evidence 后才跳过后续同格文档。
     return count >= 5
 
 
@@ -1553,18 +1916,18 @@ def build_fact(quote: str, paper: str | None, dimension: str) -> str:
     trimmed = quote.strip()
     if len(trimmed) > 160:
         trimmed = trimmed[:157] + "..."
-    return f"{subject} 在{label}相关公开资料中出现了可核验表述：{trimmed}"
+    return f"{subject} 在{label}相关论文文本中出现了可核验表述：{trimmed}"
 
 
 def source_weight(source_type: str) -> float:
     weights = {
+        "academic_paper": 0.42,
         "official_website": 0.36,
-        "pricing_page": 0.38,
         "docs": 0.35,
         "changelog": 0.32,
         "github": 0.28,
         "review_platform": 0.22,
-        "user_review": 0.20,   # 知乎等用户声音，置信度较低但有价值
+        "user_review": 0.20,   # legacy run compatibility
         "blog": 0.22,
         "other": 0.18,
     }
@@ -1659,7 +2022,7 @@ def profile_summary(
     )
 
 
-def build_core_findings(request: ResearchRequest, matrix: CompetitorMatrix, claims: list[Claim]) -> list[str]:
+def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, claims: list[Claim]) -> list[str]:
     findings: list[str] = []
     target = request.target_topic
     by_paper = {profile.paper: profile for profile in matrix.profiles}
@@ -1701,7 +2064,7 @@ def build_analysis_report(
     core_findings = build_core_findings(request, matrix, claims)
     target_strengths, target_weaknesses = build_target_advantage_analysis(request, matrix, claims, citation_numbers)
     user_attention = build_user_attention_analysis(request, matrix, claims, citation_numbers)
-    positioning = build_positioning_guidance(request, matrix, target_strengths, target_weaknesses)
+    research_guidance = build_research_guidance(request, matrix, target_strengths, target_weaknesses)
     by_dimension: dict[str, list[Claim]] = defaultdict(list)
     for claim in claims:
         by_dimension[claim.dimension].append(claim)
@@ -1731,13 +2094,13 @@ def build_analysis_report(
         "",
         *target_weaknesses,
         "",
-        "## 用户更关注什么",
+        "## 推理模式关注点",
         "",
         *user_attention,
         "",
-        "## 应该如何宣传优势",
+        "## 后续研究建议",
         "",
-        *positioning,
+        *research_guidance,
         "",
         "## 分维度深度分析",
         "",
@@ -1769,7 +2132,7 @@ def build_analysis_report(
             lines.append(f"- 代表性证据显示，{'；'.join(examples)}。")
         lines.append("")
 
-    lines.extend(["## 产品与市场建议", ""])
+    lines.extend(["## 研究机会与下一步", ""])
     if recommendations:
         for item in recommendations[:5]:
             cite = citations_for_ids(item.evidence_ids, citation_numbers)
@@ -1817,13 +2180,13 @@ def build_analysis_report(
     return "\n".join(lines)
 
 
-def build_evidence_gaps(matrix: CompetitorMatrix) -> list[str]:
+def build_evidence_gaps(matrix: PaperPatternMatrix) -> list[str]:
     weak_cells = sorted(
         [cell for cell in matrix.cells if cell.status in {"weak", "unknown"}],
         key=lambda cell: (cell.status != "unknown", cell.evidence_count),
     )
     if not weak_cells:
-        return ["按当前产品×维度矩阵看，未发现明显空白格；后续重点应转向证据交叉验证和时效性复核。"]
+        return ["按当前论文×推理模式矩阵看，未发现明显空白格；后续重点应转向证据交叉验证和时效性复核。"]
     return [
         f"{cell.paper} × {cell.dimension_label}：{cell.status}，当前 {cell.evidence_count} 条证据。"
         for cell in weak_cells[:8]
@@ -1876,7 +2239,7 @@ def citations_for_ids(evidence_ids: list[str], citation_numbers: dict[str, int],
 
 def build_target_advantage_analysis(
     request: ResearchRequest,
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     claims: list[Claim],
     citation_numbers: dict[str, int],
 ) -> tuple[list[str], list[str]]:
@@ -1904,11 +2267,11 @@ def build_target_advantage_analysis(
 
 def build_user_attention_analysis(
     request: ResearchRequest,
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     claims: list[Claim],
     citation_numbers: dict[str, int],
 ) -> list[str]:
-    attention_order = ["pricing", "feature", "user_voice", "enterprise", "positioning", "strategy"]
+    attention_order = DEFAULT_DIMENSIONS
     lines: list[str] = []
     cells_by_dimension: dict[str, list[MatrixCell]] = defaultdict(list)
     for cell in matrix.cells:
@@ -1924,8 +2287,8 @@ def build_user_attention_analysis(
         strongest = max(cells, key=lambda item: (item.evidence_count, item.confidence))
         cite = citations_for_ids(strongest.evidence_ids, citation_numbers)
         lines.append(
-            f"- **{label}** 是研究中的高频关注点之一：相关证据集中在 {strongest.paper} 等论文，"
-            f"说明用户会用这个维度判断工具是否值得迁移或付费。{cite}"
+            f"- **{label}** 是本次分析中的高频推理模式之一：相关证据集中在 {strongest.paper} 等论文，"
+            f"说明该方向已有论文反复使用这一类问题重构或机制设计。{cite}"
         )
     if not lines:
         for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)[:4]:
@@ -1933,42 +2296,42 @@ def build_user_attention_analysis(
                 f"- {compact_fact(best_claim_text(claim), 170)}"
                 f"{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
             )
-    return lines[:6] or ["- 当前用户关注点证据不足，应优先补充用户评论、评测文章和真实迁移反馈。"]
+    return lines[:6] or ["- 当前推理模式关注点证据不足，应优先补充代表性论文、最新工作和可复现实验。"]
 
 
-def build_positioning_guidance(
+def build_research_guidance(
     request: ResearchRequest,
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     strengths: list[str],
     weaknesses: list[str],
 ) -> list[str]:
     target = request.target_topic
     target_cells = {cell.dimension: cell for cell in matrix.cells if cell.paper == target}
     guidance = [
-        f"- 把 {target} 的传播重心放在已经有证据支撑的场景上，优先讲具体工作流、适用人群和可验证结果，而不是泛泛宣称更智能。",
-        "- 对已有强证据的维度，分析上不要硬碰绝对优劣，而是转成场景选择：什么时候该用这个方法、什么时候研究者会在意效率/精度/可扩展性。",
+        f"- 把 {target} 的后续分析重心放在已有证据支撑的推理模式上，优先解释具体瓶颈、机制和实验支撑。",
+        "- 对已有强证据的模式，不做绝对优劣判断；改为说明它适合解决什么研究约束，以及哪些假设仍需验证。",
     ]
-    pricing = target_cells.get("pricing")
-    if pricing and pricing.status in {"weak", "unknown"}:
-        guidance.append("- 研究方向相关材料需要更清晰：如果没有可引用的论文/实验结果/方法对比，后续分析都会难以形成确定结论。")
-    user_voice = target_cells.get("user_voice")
-    if user_voice and user_voice.status in {"weak", "unknown"}:
-        guidance.append("- 研究证据不足时，不宜把结论押在单一论文上；更适合用多篇论文交叉验证、可复现实验来逐步建立可信度。")
-    enterprise = target_cells.get("enterprise")
-    if enterprise and enterprise.status in {"weak", "unknown"}:
-        guidance.append("- 研究方向如果公开证据不足，应补齐相关论文、实验结果、方法对比和应用场景说明，否则后续分析会天然偏向资料更完整的方向。")
+    weak_modes = [
+        cell.dimension_label
+        for cell in target_cells.values()
+        if cell.status in {"weak", "unknown"}
+    ][:3]
+    if weak_modes:
+        guidance.append(
+            f"- 证据不足的推理模式（{'、'.join(weak_modes)}）暂不适合写成强结论；下一轮应补代表性论文、实验结果和方法对比。"
+        )
     return guidance[:7]
 
 
 def build_risk_notes(
     claims: list[Claim],
-    matrix: CompetitorMatrix,
+    matrix: PaperPatternMatrix,
     observability: ObservabilitySnapshot,
 ) -> list[str]:
     challenged = [claim for claim in claims if claim.verification_status != "verified"]
     gaps = build_evidence_gaps(matrix)
     lines = [
-        f"- 当前报告可信度约为 {observability.report_confidence:.0%}，适合用于方向判断，但关键商业结论仍应结合内部数据复核。",
+        f"- 当前报告可信度约为 {observability.report_confidence:.0%}，适合用于方向判断；强学术结论仍应结合领域知识和原文复核。",
     ]
     if challenged:
         lines.append(f"- 仍有 {len(challenged)} 条 Claim 未通过基础审查，报告正文已尽量采用保守措辞。")
@@ -1977,7 +2340,7 @@ def build_risk_notes(
     return lines
 
 
-def build_matrix_insights(matrix: CompetitorMatrix) -> list[str]:
+def build_matrix_insights(matrix: PaperPatternMatrix) -> list[str]:
     lines: list[str] = []
     for dimension in matrix.dimensions:
         cells = sorted(
@@ -1996,7 +2359,7 @@ def build_matrix_insights(matrix: CompetitorMatrix) -> list[str]:
         if laggards:
             sentence += " 需要补证：" + "、".join(f"{cell.paper}({cell.evidence_count}条)" for cell in laggards[:3]) + "。"
         else:
-            sentence += " 该维度各产品均有可用证据，适合进入横向对比。"
+            sentence += " 该推理模式已有可用证据，适合进入横向对比。"
         lines.append(sentence)
     return lines or ["- 当前矩阵暂无足够内容生成解读。"]
 
@@ -2051,33 +2414,34 @@ def best_claim_text(claim: Claim) -> str:
 
 def scenario_for_dimension(dimension: str) -> str:
     return {
-        "positioning": "客户比较产品定位与品牌心智",
-        "feature": "客户关注功能覆盖和工作流效率",
-        "pricing": "客户质疑价格、套餐和采购成本",
-        "user_voice": "研究者询问真实使用体验和迁移风险",
-        "enterprise": "研究者关注可扩展性、鲁棒性和部署能力",
-        "strategy": "客户评估长期路线和竞争风险",
-        "gtm": "客户比较生态、渠道和交付方式",
+        "gap_driven_reframing": "研究者关注论文如何从瓶颈重新定义问题",
+        "cross_domain_synthesis": "研究者关注跨领域知识如何合成为新方法",
+        "representation_shift": "研究者关注表征改变带来的能力边界变化",
+        "modular_pipeline_composition": "研究者关注模块化管线如何组合出可复用系统",
+        "data_evaluation_engineering": "研究者关注数据与评测设计是否支撑结论",
+        "principled_probabilistic_modeling": "研究者关注概率假设和不确定性建模是否合理",
+        "formal_experimental_tightening": "研究者关注理论与实验是否互相收紧",
+        "approximation_engineering": "研究者关注近似方法如何换取可扩展性",
+        "inference_time_control": "研究者关注推理时控制如何改变输出质量",
+        "structural_inductive_bias": "研究者关注结构归纳偏置如何约束模型行为",
+        "multiscale_hierarchical_modeling": "研究者关注多尺度层次如何组织复杂问题",
+        "mechanistic_decomposition": "研究者关注机制分解是否解释了方法有效性",
+        "adversary_modeling": "研究者关注对抗设定如何暴露鲁棒性边界",
+        "numerics_systems_codesign": "研究者关注数值与系统协同如何提升效率",
+        "data_centric_optimization": "研究者关注数据中心优化如何提升上限",
     }.get(dimension, "研究者需要快速理解推理模式差异")
 
 
 def response_for_dimension(target_topic: str, dimension: str) -> str:
-    return {
-        "positioning": f"把 {target_topic} 的研究定位说清楚，避免只在宏观方向上比较。",
-        "feature": f"用 {target_topic} 的具体方法、模型架构和实验结果回应对比。",
-        "pricing": f"把 {target_topic} 的资源需求、计算成本和部署门槛拆开说明。",
-        "user_voice": f"引用真实反馈承认证据边界，同时强调 {target_topic} 正在优化的研究主题。",
-        "enterprise": f"围绕 {target_topic} 的可扩展性、鲁棒性和部署策略给出可验证承诺。",
-        "strategy": f"把讨论收束到 {target_topic} 当前可执行的研究机会和路线图取舍。",
-        "gtm": f"强调 {target_topic} 面向目标研究者的渠道、内容和生态协作方式。",
-    }.get(dimension, f"围绕 {target_topic} 的真实研究场景给出证据化回应。")
+    label = DIMENSION_LABELS.get(dimension, dimension)
+    return f"围绕 {target_topic} 的{label}证据，说明代表性论文解决的瓶颈、机制和仍需验证的边界。"
 
 
 def talk_track_for_dimension(target_topic: str, paper: str, dimension: str) -> str:
     label = DIMENSION_LABELS.get(dimension, dimension)
     return (
-        f"{paper} 在公开资料中确实有{label}相关表达；我们的比较重点不是否认对方，"
-        f"而是确认研究者当前最重要的约束，再说明 {target_topic} 在该约束下能提供什么可验证价值。"
+        f"{paper} 在公开论文中提供了{label}相关证据；比较重点应是它解决了什么瓶颈、"
+        f"采用了什么机制，以及它与 {target_topic} 方向内其他工作形成了怎样的互补或冲突。"
     )
 
 
@@ -2085,12 +2449,12 @@ def response_for_cell(target_topic: str, target_cell: MatrixCell | None, paper_c
     label = paper_cell.dimension_label
     if target_cell and target_cell.status in {"strong", "partial"}:
         return (
-            f"把讨论转到研究者的{label}使用场景：{target_topic} 已有可引用证据，"
+            f"把讨论转到研究者的{label}证据链：{target_topic} 已有可引用证据，"
             f"重点强调 {compact_fact(target_cell.summary, 150)}"
         )
     return (
-        f"承认 {paper_cell.paper} 在{label}上的公开资料更完整；"
-        f"{target_topic} 当前应避免硬拼该卖点，改用已验证场景切入，并把{label}材料列为补齐项。"
+        f"承认 {paper_cell.paper} 在{label}上的公开证据更完整；"
+        f"{target_topic} 当前应避免强行下判断，并把{label}相关论文和实验结果列为补齐项。"
     )
 
 
@@ -2104,13 +2468,13 @@ def talk_track_for_cell(
     if target_cell and target_cell.status in {"strong", "partial"}:
         return (
             f"如果您关注{label}，{paper} 的公开资料确实覆盖了这些点；"
-            f"但我们建议把比较放到实际研究场景里看。{target_topic} 目前能拿出来对照的是："
+            f"但比较应放到具体研究假设里看。{target_topic} 目前能拿出来对照的是："
             f"{compact_fact(target_cell.summary, 130)}。这更适合判断它是否贴合您的研究约束。"
         )
     return (
-        f"在{label}上，{paper} 的公开证据更充分，我们不建议用一句话判断谁绝对更好。"
-        f"如果这个维度是您的研究关键项，我们会先补充 {target_topic} 的可验证材料；"
-        f"同时可以先从已验证的研究场景或实验结果判断是否值得进入下一轮评估。"
+        f"在{label}上，{paper} 的公开证据更充分，不建议用一句话判断谁绝对更好。"
+        f"如果这个模式是研究关键项，应先补充 {target_topic} 的可验证材料；"
+        f"再基于实验设置和适用边界判断是否进入下一轮评估。"
     )
 
 
@@ -2118,12 +2482,12 @@ def followup_for_cell(target_topic: str, target_cell: MatrixCell | None, paper_c
     label = paper_cell.dimension_label
     if target_cell and target_cell.status in {"strong", "partial"}:
         return (
-            f"准备一页 {label} 对比页，放入 {target_topic} 的证据链接、研究场景和可复现实验；"
-            "研究沟通中只引用已验证点，避免延展到未覆盖能力。"
+            f"整理一页 {label} 证据表，放入 {target_topic} 的论文链接、机制摘要和可复现实验；"
+            "研究讨论中只引用已验证点，避免延展到未覆盖能力。"
         )
     return (
         f"补齐 {target_topic} 的{label}公开证据：论文说明、实验结果、方法对比、"
-        "应用场景或第三方评测至少补齐两类来源后，再把它作为主卖点。"
+        "应用场景或第三方评测至少补齐两类来源后，再把它作为主要研究结论。"
     )
 
 
@@ -2186,8 +2550,8 @@ def build_matrix_csv(matrix: PaperPatternMatrix) -> str:
 
 def build_recommendations_markdown(recommendations: list[OpportunityRecommendation]) -> str:
     if not recommendations:
-        return "# Opportunity Recommendations\n\n当前没有足够证据生成建议。\n"
-    lines = ["# Opportunity Recommendations", ""]
+        return "# Research Recommendations\n\n当前没有足够证据生成建议。\n"
+    lines = ["# Research Recommendations", ""]
     for item in recommendations:
         lines.extend(
             [
@@ -2236,8 +2600,8 @@ def build_methodology(request: ResearchRequest, observability: ObservabilitySnap
     return (
         f"# Methodology\n\n"
         f"ScholarInsight 对「{request.project_name}」执行了 5 Agent deep research 流程："
-        "ResearchPlanningAgent 规划研究范围与质量规则，SourceResearchAgent 发现来源并抓取网页，"
-        "EvidenceStructuringAgent 抽取可溯源事实，AnalysisAndReviewAgent 生成结论、反方审查并整理矩阵/建议/战斗卡，"
+        "ResearchPlanningAgent 规划研究范围与质量规则，SourceResearchAgent 检索本地论文库并补充来源，"
+        "EvidenceStructuringAgent 抽取可溯源事实，AnalysisAndReviewAgent 生成结论、反方审查并整理矩阵/建议，"
         "ReportComposerAgent 生成本地 Markdown、JSON 与 CSV 交付文件。\n\n"
         "所有产物均保存在本 Run 目录下，可直接审计 JSON/JSONL/Markdown/CSV 文件。\n\n"
         "## Quality Gates\n\n"

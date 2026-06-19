@@ -120,17 +120,17 @@ def test_merge_candidates_keeps_best_score_and_provider_lineage() -> None:
     merged = merge_candidates(
         [
             SourceCandidate(
-                url="https://alpha.example/pricing#faq",
-                title="Alpha pricing",
+                url="https://papers.example/rag-survey#abstract",
+                title="RAG survey",
                 source_provider="serper",
                 score=0.75,
             )
         ],
         [
             SourceCandidate(
-                url="https://alpha.example/pricing",
-                title="Alpha plans",
-                snippet="Plans and billing",
+                url="https://papers.example/rag-survey",
+                title="Retrieval-Augmented Generation survey",
+                snippet="Survey and benchmark discussion",
                 source_provider="brave",
                 score=0.77,
             )
@@ -138,6 +138,6 @@ def test_merge_candidates_keeps_best_score_and_provider_lineage() -> None:
     )
 
     assert len(merged) == 1
-    assert merged[0].url == "https://alpha.example/pricing"
+    assert merged[0].url == "https://papers.example/rag-survey"
     assert merged[0].source_provider == "serper,brave"
-    assert merged[0].snippet == "Plans and billing"
+    assert merged[0].snippet == "Survey and benchmark discussion"

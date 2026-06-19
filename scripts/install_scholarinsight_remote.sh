@@ -4,13 +4,13 @@ set -Eeuo pipefail
 export PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export UV_DEFAULT_INDEX="${UV_DEFAULT_INDEX:-https://mirrors.aliyun.com/pypi/simple/}"
 
-ARCHIVE="${1:-/tmp/competegraph.tar.gz}"
-APP_ROOT="${2:-/mnt/competegraph}"
+ARCHIVE="${1:-/tmp/scholarinsight.tar.gz}"
+APP_ROOT="${2:-/mnt/scholarinsight}"
 BACKEND_PORT="${3:-18000}"
 FRONTEND_PORT="${4:-18080}"
 APP_DIR="$APP_ROOT/app"
-SERVICE_NAME="competegraph-api"
-NGINX_CONF="/etc/nginx/conf.d/competegraph.conf"
+SERVICE_NAME="scholarinsight-api"
+NGINX_CONF="/etc/nginx/conf.d/scholarinsight.conf"
 PYTHON_VERSION="3.11"
 
 log() {
@@ -57,12 +57,12 @@ deploy_files() {
   log "Deploying files to $APP_DIR"
   mkdir -p "$APP_DIR"
   if [ -f "$APP_DIR/backend/.env" ]; then
-    cp "$APP_DIR/backend/.env" /tmp/competegraph_backend_env.keep
+    cp "$APP_DIR/backend/.env" /tmp/scholarinsight_backend_env.keep
   fi
   rm -rf "$APP_DIR/frontend/dist"
   tar -xzf "$ARCHIVE" -C "$APP_DIR"
-  if [ -f /tmp/competegraph_backend_env.keep ]; then
-    mv /tmp/competegraph_backend_env.keep "$APP_DIR/backend/.env"
+  if [ -f /tmp/scholarinsight_backend_env.keep ]; then
+    mv /tmp/scholarinsight_backend_env.keep "$APP_DIR/backend/.env"
   fi
   mkdir -p "$APP_DIR/data"
 }
@@ -80,7 +80,7 @@ write_systemd_service() {
   log "Writing systemd service"
   cat > "/etc/systemd/system/${SERVICE_NAME}.service" <<EOF
 [Unit]
-Description=CompeteGraph FastAPI backend
+Description=ScholarInsight FastAPI backend
 After=network-online.target
 Wants=network-online.target
 
@@ -110,7 +110,7 @@ write_nginx_config() {
   if [ "$FRONTEND_PORT" = "80" ]; then
     for default_conf in /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf; do
       if [ -e "$default_conf" ]; then
-        mv "$default_conf" "${default_conf}.disabled-by-competegraph-$(date +%s)"
+        mv "$default_conf" "${default_conf}.disabled-by-scholarinsight-$(date +%s)"
       fi
     done
   fi
@@ -192,8 +192,8 @@ verify() {
   log "Verifying services"
   systemctl --no-pager --full status "$SERVICE_NAME" | sed -n '1,18p'
   for attempt in 1 2 3 4 5; do
-    if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/tmp/competegraph-health.json; then
-      cat /tmp/competegraph-health.json
+    if curl -fsS "http://127.0.0.1:${BACKEND_PORT}/health" >/tmp/scholarinsight-health.json; then
+      cat /tmp/scholarinsight-health.json
       printf '\n'
       break
     fi
@@ -215,4 +215,4 @@ write_nginx_config
 open_local_firewall
 verify
 
-log "CompeteGraph is deployed at $APP_ROOT"
+log "ScholarInsight is deployed at $APP_ROOT"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -29,6 +30,20 @@ from cg.schemas.research import (
 RUN_SUBDIRS = ["sources", "documents", "evidence", "claims", "trace", "reports", "exports"]
 
 
+def _topic_to_slug(topic: str, max_len: int = 40) -> str:
+    """Convert a topic string to a filesystem-safe slug."""
+    # Remove common prefixes
+    topic = re.sub(r'^(论文推理模式分析:\s*|分析\s*)', '', topic)
+    # Replace non-alphanumeric chars (except Chinese) with underscore
+    slug = re.sub(r'[^\w一-鿿]', '_', topic)
+    # Collapse multiple underscores
+    slug = re.sub(r'_+', '_', slug).strip('_')
+    # Truncate
+    if len(slug) > max_len:
+        slug = slug[:max_len].rstrip('_')
+    return slug or "unknown"
+
+
 class RunRepository:
     def __init__(self, data_dir: Path):
         self.data_dir = data_dir
@@ -40,7 +55,11 @@ class RunRepository:
 
     async def create(self, request: ResearchRequest, owner: str | None = None) -> RunStatus:
         now = datetime.now(timezone.utc)
-        run_id = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        if owner == "batch_daemon":
+            run_id = _topic_to_slug(request.project_name, max_len=80)
+        else:
+            topic_slug = _topic_to_slug(request.target_topic)
+            run_id = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{topic_slug}"
         run_dir = self.run_dir(run_id)
         for subdir in RUN_SUBDIRS:
             (run_dir / subdir).mkdir(parents=True, exist_ok=True)
