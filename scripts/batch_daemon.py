@@ -105,7 +105,7 @@ async def run_topic(
     async with semaphore:
         request = ResearchRequest(
             project_name=f"论文推理模式分析: {topic}",
-            target_product=topic,
+            target_topic=topic,
             competitors=[],
             research_goal=f"分析 {topic} 方向中论文之间的创新关系和推理模式分布",
             max_sources=50,
