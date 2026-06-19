@@ -14,12 +14,13 @@
 - [x] Phase 2: Embedding 索引（35,031 × 1024，GPU 加速）
 
 ## Phase 3-8: 后端代码改造 ✅
-- [x] Phase 3: Schemas（15 种推理模式）+ Settings（mimo provider）+ .env
+- [x] Phase 3: Schemas（15 种推理模式）+ Settings（mimo + gemini provider）+ .env
 - [x] Phase 4: LLM Client（max_tokens=8192, reasoning_content, 429 无限重试）
 - [x] Phase 5: LocalPaperSearchTool（embedding 检索 + text fallback）
 - [x] Phase 6: Pipeline + 5 个 Agent system prompt 改造
 - [x] Phase 7: Skills YAML 更新 + uvicorn 验证
 - [x] Phase 8: Batch Daemon 代码（topics.json 132 话题 + batch_daemon.py）
+- [x] Gemini 红队审查：MiMo 主分析 + Gemini 红队（模型多样性）
 
 ## Phase 9: 前端改造 ❌ 待执行
 - [ ] 9a: 品牌名 CompeteInsight → ScholarInsight

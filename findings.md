@@ -39,7 +39,12 @@
 ## Issues Encountered
 | Issue | Resolution |
 |-------|------------|
-| LLMClient 不兼容 MiMo thinking | 需改造：reasoning_content fallback + max_tokens |
+| LLMClient 不兼容 MiMo thinking | 已修复：reasoning_content fallback + max_tokens=8192 |
+| PyTorch cu130 vs driver cu128 | 降级到 cu128 + Python 3.10 |
+| torchvision 版本不匹配 | torch 2.11 + torchvision 0.26 共存 |
+| normalize_url 不支持本地路径 | 添加 `/` 开头路径判断 |
+| macOS ._{'`'} 文件污染 index | 清理后重跑 |
+| 红队未使用 Gemini | 已实现：独立 Gemini LLMClient，pipeline.red_team() 使用 |
 
 ## Resources
 - CompeteInsight 源码: /home/zsz/Mimo/CompeteInsight/
