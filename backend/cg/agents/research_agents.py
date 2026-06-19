@@ -944,7 +944,7 @@ class EvidenceStructuringAgent(BaseAgent):
                 "8. confidence 按证据强度打分：有充分实验验证 → 0.80-0.92，初步探索 → 0.55-0.70\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"paper", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                '输出 JSON：{"evidence":[{"paper": "论文名", "dimension": "维度", "reasoning_pattern": "推理模式", "bottleneck": "瓶颈", "mechanism": "机制", "fact": "创新事实", "quote": "原文片段", "confidence": 0.8}]}\n'
                 "每篇论文最多提取 8 条，只保留有实质创新信息的。"
             )
         else:
@@ -969,7 +969,7 @@ class EvidenceStructuringAgent(BaseAgent):
                 "9. 同一创新点只提取一次，不要重复\n"
                 "\n"
                 f"dimension 只能从以下值选择：{', '.join(dimensions)}\n"
-                '输出 JSON：{"evidence":[{"paper", "dimension", "reasoning_pattern", "bottleneck", "mechanism", "fact", "quote", "confidence"}]}\n'
+                '输出 JSON：{"evidence":[{"paper": "论文名", "dimension": "维度", "reasoning_pattern": "推理模式", "bottleneck": "瓶颈", "mechanism": "机制", "fact": "创新事实", "quote": "原文片段", "confidence": 0.8}]}\n'
                 "每篇论文最多提取 10 条最重要的创新证据。"
             )
 
