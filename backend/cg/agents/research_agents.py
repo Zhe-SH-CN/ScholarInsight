@@ -1006,6 +1006,9 @@ class EvidenceStructuringAgent(BaseAgent):
             evidence_id = stable_id_fn("ev", f"{self.ctx.run_id}:{document.url}:{dimension}:{quote}")
             paper = str(row.get("paper") or "").strip() or None
             freshness = compute_freshness_score(document.published_at, dimension)
+            reasoning_pattern = str(row.get("reasoning_pattern") or "").strip()
+            bottleneck = str(row.get("bottleneck") or "").strip()
+            mechanism = str(row.get("mechanism") or "").strip()
             items.append(
                 Evidence(
                     evidence_id=evidence_id,
@@ -1024,6 +1027,9 @@ class EvidenceStructuringAgent(BaseAgent):
                     source_url=document.url,
                     source_id=document.source_id,
                     confidence=confidence,
+                    reasoning_pattern=reasoning_pattern,
+                    bottleneck=bottleneck,
+                    mechanism=mechanism,
                     authority_score=round(source_weight_fn(document.source_type) + 0.3, 3),
                     freshness_score=freshness,
                     relevance_score=confidence,
