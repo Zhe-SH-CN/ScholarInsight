@@ -999,9 +999,15 @@ class EvidenceStructuringAgent(BaseAgent):
             fact = str(row.get("fact") or "").strip()
             if len(quote) < 15 or not fact:
                 continue
-            # 知乎内容来自 snippet/摘要，quote 可能不完全匹配 content，放宽校验
+            # 学术论文：LLM 可能从论文任意部分提取 quote，不要求严格匹配 content
+            # 只要求 quote 包含一些 content 中的单词即可
             if not is_user_voice and quote.lower() not in content_lower:
-                continue
+                # 放宽检查：只要 quote 中有 30% 以上的单词出现在 content 中就接受
+                quote_words = set(quote.lower().split())
+                content_words = set(content_lower.split())
+                overlap = len(quote_words & content_words) / max(len(quote_words), 1)
+                if overlap < 0.3:
+                    continue
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
             evidence_id = stable_id_fn("ev", f"{self.ctx.run_id}:{document.url}:{dimension}:{quote}")
             paper = str(row.get("paper") or "").strip() or None
