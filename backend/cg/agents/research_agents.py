@@ -1762,7 +1762,7 @@ class ReportComposerAgent(BaseAgent):
             "project": {
                 "name": request.project_name,
                 "target_topic": request.target_topic,
-                "product_description": request.product_description,
+                "topic_description": request.topic_description,
                 "papers": request.seed_papers,
                 "research_goal": request.research_goal,
                 "analysis_dimensions": [DIMENSION_LABELS.get(item, item) for item in dimensions],
