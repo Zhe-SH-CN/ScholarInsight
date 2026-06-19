@@ -4,7 +4,7 @@
 将 CompeteInsight 改造为 ScholarInsight（学术论文推理模式分析）+ 24/7 batch daemon 持续消耗 MiMo 380B tokens。
 
 ## Current Phase
-后端完成，前端改造 + batch daemon 重启
+后端完成，前端 App.tsx 改造 + batch daemon 重启
 
 ---
 
@@ -22,25 +22,36 @@
 - [x] Phase 8: Batch Daemon 代码（topics.json 132 话题 + batch_daemon.py）
 - [x] Gemini 红队审查：MiMo 主分析 + Gemini 红队（模型多样性）
 
-## Phase 9: 前端改造 ❌ 待执行
-- [ ] 9a: 品牌名 CompeteInsight → ScholarInsight
-- [ ] 9b: dimensionOptions 改为 15 种推理模式（中文标签）
-- [ ] 9c: defaultDraft 改为学术语境默认值
-- [ ] 9d: IntroCarousel 内容改为论文分析流程
-- [ ] 9e: EvidenceView 加 reasoning_pattern / bottleneck / mechanism 显示
-- [ ] 9f: BriefView 维度显示改为推理模式
-- [ ] 9g: ResearchComposer 表单标签改为学术语境
-- [ ] 9h: 前端构建验证
+## Phase 9: 后端残留清理 + 环境重建 ✅
+- [x] 全面清理 CompeteInsight 残留 (~110 处)
+- [x] schemas/research.py: CompetitorMatrix→PaperPatternMatrix, BattlecardItem→删除
+- [x] pipeline.py: build_competitor_matrix→build_paper_pattern_matrix, 删除 battlecards
+- [x] research_agents.py: competitor→paper, target_product→target_topic
+- [x] api/runs.py: 删除 suggest_competitors 端点
+- [x] settings.py: user_agent→ScholarInsightBot
+- [x] skills/*.yaml: competitor→paper, battlecards→删除
+- [x] main.py/runtime.py/__init__.py: 品牌名更新
+- **Status:** complete
 
-## Phase 10: Batch Daemon 重启 ❌ 待执行
-- [ ] 10a: 清理旧 runs（基于旧 index 的）
-- [ ] 10b: 重启 batch daemon（新 index + 新 embedding）
-- [ ] 10c: 监控直到全部 132 话题完成
+## Phase 10: 前端 App.tsx 改造 ❌ 待执行
+- [ ] 10a: 品牌名 CompeteInsight → ScholarInsight
+- [ ] 10b: dimensionOptions 改为 15 种推理模式（中文标签）
+- [ ] 10c: defaultDraft 改为学术语境默认值
+- [ ] 10d: IntroCarousel 内容改为论文分析流程
+- [ ] 10e: EvidenceView 加 reasoning_pattern / bottleneck / mechanism 显示
+- [ ] 10f: BriefView 维度显示改为推理模式
+- [ ] 10g: ResearchComposer 表单标签改为学术语境
+- [ ] 10h: 前端构建验证
 
-## Phase 11: 最终收尾
-- [ ] 11a: Git commit + push 所有改动
-- [ ] 11b: 更新 progress.md / findings.md
-- [ ] 11c: 输出验收报告
+## Phase 11: Batch Daemon 重启 ❌ 待执行
+- [ ] 11a: 清理旧 runs（基于旧 index 的）
+- [ ] 11b: 重启 batch daemon（新 index + 新 embedding）
+- [ ] 11c: 监控直到全部 132 话题完成
+
+## Phase 12: 最终收尾 ❌ 待执行
+- [ ] 12a: Git commit + push 所有改动
+- [ ] 12b: 更新 progress.md / findings.md
+- [ ] 12c: 输出验收报告
 
 ---
 

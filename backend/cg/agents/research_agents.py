@@ -497,7 +497,7 @@ class SourceResearchAgent(BaseAgent):
                 "【停止条件，必须同时满足】\n"
                 "1. 每个产品×每个维度至少有 3 条不同 URL 的候选内容\n"
                 "2. 核心方向必须有代表性论文和最新进展\n"
-                "3. 用户口碑维度必须有知乎/社区/评测类用户声音\n"
+                "3. 核心推理模式维度必须有多篇论文交叉验证\n"
                 "4. Analysis Agent 反馈的缺口已经被补上\n"
                 "5. 最近搜索仍有新增内容；若连续两轮没有新增，系统会自动停止\n\n"
                 "【行动空间】\n"
@@ -1183,7 +1183,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "3. 【过度推断风险】：结论超出证据直接支持的范围 → severity=medium\n"
                 "4. 【时效风险】：证据可能过时（产品更新快，6个月前的数据需标注）→ severity=low\n"
                 "5. 【措辞风险】：使用了'最好'、'唯一'、'绝对'等绝对化表述而证据不支撑 → severity=medium\n"
-                "6. 【用户声音缺失】：官方数据充分但缺乏真实用户反馈佐证 → severity=low\n"
+                "6. 【实验验证缺失】：理论分析充分但缺乏实验结果佐证 → severity=low\n"
                 "\n"
                 "【验证状态标准】\n"
                 "- verified：多源交叉验证，结论措辞保守，无明显风险\n"
@@ -1193,7 +1193,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "\n"
                 "【final_wording 要求】\n"
                 "对 challenged/needs_evidence 的结论，必须给出修改后的保守表述：\n"
-                "  - 加限定语：'根据官方公开资料...'、'据目前可见的证据...'、'部分用户反馈显示...'\n"
+                "  - 加限定语：'根据现有论文...'、'据目前可见的证据...'、'部分实验结果显示...'\n"
                 "  - 降低确定性：把'是'改成'似乎是'，把'最好'改成'表现较好'\n"
                 "\n"
                 "【输出格式】JSON：\n"
@@ -1309,7 +1309,7 @@ class AnalysisAndReviewAgent(BaseAgent):
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
         entities = [request.target_topic]
 
-        # 计算各维度×竞品的覆盖情况
+        # 计算各维度×推理模式的覆盖情况
         coverage_map: dict[tuple[str, str], int] = {}
         for ev in evidence:
             if ev.paper and ev.dimension:
@@ -1391,7 +1391,7 @@ class AnalysisAndReviewAgent(BaseAgent):
         }
         data = await self.invoke_json(
             system=(
-                "你是竞品分析审查智能体（AnalysisAndReviewAgent）的证据缺口评估器。\n"
+                "你是推理模式分析审查智能体（AnalysisAndReviewAgent）的证据缺口评估器。\n"
                 "\n"
                 "【任务】\n"
                 "基于当前证据覆盖矩阵，判断是否需要启动下一轮搜索，以及优先补充哪些信息缺口。\n"
@@ -1545,13 +1545,13 @@ class ReportComposerAgent(BaseAgent):
                 "\n"
                 "【报告质量要求】\n"
                 "1. 摘要要有真正的判断：谁在哪个维度领先、竞争格局如何、目标产品的核心机会在哪里\n"
-                "2. 竞品对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
+                "2. 推理模式对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
                 "3. 每个维度分析要写对比性段落：说清楚各家的差异是什么、意味着什么、谁更适合哪类用户\n"
                 "4. 给出具体的、有据可查的结论——不要写'各有优劣'、'建议持续关注'这类无信息量的话\n"
-                "5. 销售对话指南要给出能直接对客户说的差异化话术，针对具体场景，避免模板化\n"
-                "6. 战略建议要可操作，结合竞品格局说明为什么这么建议\n"
+                "5. 研究建议要给出能直接指导后续研究的差异化方向，针对具体场景，避免模板化\n"
+                "6. 研究建议要可操作，结合推理模式分布说明为什么这么建议\n"
                 "7. 每个关键判断后用方括号标注来源编号，如[1][3]，不要暴露内部ID\n"
-                "8. 证据条目后附有（YYYY-MM）格式的发布月份标注；时效性敏感维度（定价、功能更新、战略动态）"
+                "8. 证据条目后附有（YYYY-MM）格式的发布月份标注；时效性敏感维度（资源需求、方法更新、研究动态）"
                 "优先引用较新的证据，若只有旧证据可用，应在报告中注明'截至YYYY年MM月'并提示信息可能已更新\n"
                 "9. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的商业分析。\n"
                 "10. 如果 briefing notes 对某个判断支持不足，请直接写'现有公开证据不足以判断'，不要补充想象。\n"
@@ -1560,16 +1560,16 @@ class ReportComposerAgent(BaseAgent):
                 "# [报告标题]\n"
                 "## 执行摘要\n"
                 "3-5条核心结论，每条直接给出判断\n"
-                "## 竞品格局概览\n"
+                "## 推理模式格局概览\n"
                 "简短段落描述各产品的市场定位和竞争角色\n"
-                "## 竞品能力对比矩阵\n"
+                "## 推理模式能力对比矩阵\n"
                 "Markdown表格，每格写简洁文字判断\n"
                 "## 各维度深度分析\n"
                 "每个维度一节，写比较性分析段落\n"
                 "## 目标产品分析：优势与机会\n"
                 "## 目标产品分析：不足与风险\n"
                 "## 战略建议\n"
-                "## 销售对话指南\n"
+                "## 研究建议\n"
                 "## 参考来源\n"
                 "在此处输出占位符 <<REFERENCES>>，系统会自动替换为完整的参考来源列表\n"
                 "\n"
@@ -1845,7 +1845,7 @@ class ReportComposerAgent(BaseAgent):
 
         markdown = await self.invoke_text_strict(
             system=(
-                "你是竞品研究报告的执行摘要写作者。请只基于输入中的证据、Claim、矩阵覆盖和建议来写，"
+                "你是推理模式研究报告的执行摘要写作者。请只基于输入中的证据、Claim、矩阵覆盖和建议来写，"
                 "不要编造额外事实，不要暴露 ev_ ID，不要写模板化空话。"
                 "输出中文 Markdown，结构为：# Summary、## Key Findings、## Recommended Moves、## Confidence Notes。"
                 "Key Findings 必须是有判断的 3-5 条结论；Recommended Moves 写 2-4 条可执行建议；"
@@ -1917,7 +1917,7 @@ class ReportComposerAgent(BaseAgent):
 
         markdown = await self.invoke_text_strict(
             system=(
-                "你是竞品研究方法论说明的作者。请基于输入中的真实运行数据说明本次研究如何完成，"
+                "你是推理模式研究方法论说明的作者。请基于输入中的真实运行数据说明本次研究如何完成，"
                 "包括研究设计、来源采集、Evidence 抽取、Claim 生成与 Red Team 审查、质量门禁和局限性。"
                 "不要写成产品介绍，不要暴露内部文件路径，不要把质量门禁简单逐字翻译成表格。"
                 "输出中文 Markdown，结构为：# Methodology、## Research Design、## Evidence Pipeline、"
@@ -2433,9 +2433,9 @@ def clamp_float(value: Any, low: float, high: float) -> float:
     return round(max(low, min(high, parsed)), 3)
 
 
-# 按维度的时效半衰期（天）：定价变化快，品牌定位变化慢
+# 按维度的时效半衰期（天）：资源需求变化快，研究定位变化慢
 _FRESHNESS_HALF_LIFE: dict[str, float] = {
-    "pricing":     90,    # 3 个月，旧定价基本失效
+    "pricing":     90,    # 3 个月，旧资源需求基本失效
     "strategy":    120,   # 4 个月
     "feature":     180,   # 6 个月
     "enterprise":  270,   # 9 个月

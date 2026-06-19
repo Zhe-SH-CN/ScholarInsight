@@ -93,7 +93,7 @@ DIMENSION_KEYWORDS: dict[str, list[str]] = {
         "$",
         "billing",
         "subscription",
-        "定价",
+        "资源需求",
         "价格",
         "免费",
         "订阅",
@@ -788,7 +788,7 @@ class ResearchPipeline:
                 "EvidenceStructuringAgent",
                 "progress",
                 "skipped_sufficient",
-                f"跳过 {skipped_documents} 篇文档：对应竞品×维度 Evidence 已较充分",
+                f"跳过 {skipped_documents} 篇文档：对应推理模式×维度 Evidence 已较充分",
                 {"count": skipped_documents},
             )
         return evidence_items
@@ -825,7 +825,7 @@ class ResearchPipeline:
                 "EvidenceStructuringAgent",
                 "progress",
                 "skipped_sufficient",
-                f"跳过 {skipped_documents} 篇文档：对应竞品×维度 Evidence 已较充分",
+                f"跳过 {skipped_documents} 篇文档：对应推理模式×维度 Evidence 已较充分",
                 {"count": skipped_documents},
             )
         return evidence_items
@@ -1299,11 +1299,11 @@ def build_observability(
         ),
         QualityGate(
             gate_id="gate_coverage",
-            name="竞品矩阵覆盖度",
+            name="推理模式矩阵覆盖度",
             status=gate_status(coverage_score, 0.58, 0.28),
             score=round(coverage_score, 3),
             message=f"矩阵覆盖度为 {coverage_score:.0%}。",
-            suggested_action="补齐低覆盖竞品或低覆盖维度的来源。",
+            suggested_action="补齐低覆盖推理模式或低覆盖维度的来源。",
         ),
     ]
     return ObservabilitySnapshot(
@@ -1713,7 +1713,7 @@ def build_analysis_report(
         "",
         *[f"- {finding}" for finding in core_findings],
         "",
-        "## 竞品对比矩阵",
+        "## 推理模式对比矩阵",
         "",
         build_matrix_markdown(matrix, citation_numbers),
         "",
@@ -1889,7 +1889,7 @@ def build_target_advantage_analysis(
             strengths.append(f"- **{cell.dimension_label}**：{cell.summary}{cite}")
         else:
             weaknesses.append(
-                f"- **{cell.dimension_label}**：当前公开证据偏弱，不能把它作为强卖点；建议补充可被引用的产品页、案例或用户反馈。{cite}"
+                f"- **{cell.dimension_label}**：当前公开证据偏弱，不能把它作为强结论；建议补充可被引用的论文、实验结果或最新进展。{cite}"
             )
     if not strengths:
         lead_claims = sorted(claims, key=lambda item: item.confidence, reverse=True)[:3]
@@ -1898,7 +1898,7 @@ def build_target_advantage_analysis(
             for claim in lead_claims
         ] or [f"- 暂未形成 {request.target_topic} 的强研究结论，应优先补齐相关论文和最新进展。"]
     if not weaknesses:
-        weaknesses = ["- 暂无明显空白维度；下一步应重点验证优势是否能被第三方评测和用户声音交叉支持。"]
+        weaknesses = ["- 暂无明显空白维度；下一步应重点验证优势是否能被第三方论文和实验结果交叉支持。"]
     return strengths[:6], weaknesses[:6]
 
 
@@ -1945,18 +1945,18 @@ def build_positioning_guidance(
     target = request.target_topic
     target_cells = {cell.dimension: cell for cell in matrix.cells if cell.paper == target}
     guidance = [
-        f"- 把 {target} 的传播重心放在已经有证据支撑的场景上，优先讲具体工作流、适用人群和可验证结果，而不是泛泛宣称“更智能”。",
-        "- 对竞品已经建立强心智的维度，宣传上不要硬碰绝对优劣，而是转成场景选择：什么时候该选我们、什么时候用户会在意集成/价格/企业治理。",
+        f"- 把 {target} 的传播重心放在已经有证据支撑的场景上，优先讲具体工作流、适用人群和可验证结果，而不是泛泛宣称更智能。",
+        "- 对已有强证据的维度，分析上不要硬碰绝对优劣，而是转成场景选择：什么时候该用这个方法、什么时候研究者会在意效率/精度/可扩展性。",
     ]
     pricing = target_cells.get("pricing")
     if pricing and pricing.status in {"weak", "unknown"}:
-        guidance.append("- 定价相关材料需要更清晰：如果没有可引用的价格/套餐/试用边界，销售和评测都会难以形成确定预期。")
+        guidance.append("- 研究方向相关材料需要更清晰：如果没有可引用的论文/实验结果/方法对比，后续分析都会难以形成确定结论。")
     user_voice = target_cells.get("user_voice")
     if user_voice and user_voice.status in {"weak", "unknown"}:
-        guidance.append("- 用户口碑不足时，不宜把宣传押在“真实用户都喜欢”这类表达上；更适合用小范围案例、开发者故事和可复现实测来逐步补信任。")
+        guidance.append("- 研究证据不足时，不宜把结论押在单一论文上；更适合用多篇论文交叉验证、可复现实验来逐步建立可信度。")
     enterprise = target_cells.get("enterprise")
     if enterprise and enterprise.status in {"weak", "unknown"}:
-        guidance.append("- 企业化能力如果公开证据不足，应补齐权限、数据边界、审计、部署和采购流程说明，否则大客户比较时会天然偏向资料更完整的竞品。")
+        guidance.append("- 研究方向如果公开证据不足，应补齐相关论文、实验结果、方法对比和应用场景说明，否则后续分析会天然偏向资料更完整的方向。")
     return guidance[:7]
 
 
@@ -2054,11 +2054,11 @@ def scenario_for_dimension(dimension: str) -> str:
         "positioning": "客户比较产品定位与品牌心智",
         "feature": "客户关注功能覆盖和工作流效率",
         "pricing": "客户质疑价格、套餐和采购成本",
-        "user_voice": "客户询问真实用户口碑和迁移风险",
-        "enterprise": "客户关注团队治理、安全和企业化能力",
+        "user_voice": "研究者询问真实使用体验和迁移风险",
+        "enterprise": "研究者关注可扩展性、鲁棒性和部署能力",
         "strategy": "客户评估长期路线和竞争风险",
         "gtm": "客户比较生态、渠道和交付方式",
-    }.get(dimension, "客户需要快速理解竞品差异")
+    }.get(dimension, "研究者需要快速理解推理模式差异")
 
 
 def response_for_dimension(target_topic: str, dimension: str) -> str:
@@ -2101,16 +2101,16 @@ def talk_track_for_cell(
     paper_cell: MatrixCell,
 ) -> str:
     label = paper_cell.dimension_label
-    if target_cell and target_cell.status in {“strong”, “partial”}:
+    if target_cell and target_cell.status in {"strong", "partial"}:
         return (
-            f””如果您关注{label}，{paper} 的公开资料确实覆盖了这些点；”
-            f”但我们建议把比较放到实际研究场景里看。{target_topic} 目前能拿出来对照的是：”
-            f”{compact_fact(target_cell.summary, 130)}。这更适合判断它是否贴合您的研究约束。””
+            f"如果您关注{label}，{paper} 的公开资料确实覆盖了这些点；"
+            f"但我们建议把比较放到实际研究场景里看。{target_topic} 目前能拿出来对照的是："
+            f"{compact_fact(target_cell.summary, 130)}。这更适合判断它是否贴合您的研究约束。"
         )
     return (
-        f””在{label}上，{paper} 的公开证据更充分，我们不建议用一句话判断谁绝对更好。”
-        f”如果这个维度是您的研究关键项，我们会先补充 {target_topic} 的可验证材料；”
-        f”同时可以先从已验证的研究场景或实验结果判断是否值得进入下一轮评估。””
+        f"在{label}上，{paper} 的公开证据更充分，我们不建议用一句话判断谁绝对更好。"
+        f"如果这个维度是您的研究关键项，我们会先补充 {target_topic} 的可验证材料；"
+        f"同时可以先从已验证的研究场景或实验结果判断是否值得进入下一轮评估。"
     )
 
 
