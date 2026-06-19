@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 
 import httpx
 import trafilatura
@@ -37,7 +37,7 @@ class Fetcher:
         headers = {"User-Agent": self.settings.cg_user_agent}
         timeout = httpx.Timeout(self.settings.cg_http_timeout_seconds)
         proxy = self.settings.http_proxy or None
-        fetched_at = datetime.now(UTC)
+        fetched_at = datetime.now(timezone.utc)
         try:
             async with httpx.AsyncClient(
                 follow_redirects=True,

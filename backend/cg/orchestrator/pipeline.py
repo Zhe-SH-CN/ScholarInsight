@@ -7,7 +7,7 @@ import asyncio
 import re
 from collections import Counter, defaultdict
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 from urllib.parse import urlparse
@@ -433,7 +433,7 @@ class ResearchPipeline:
 
             status.status = "completed"
             status.current_stage = "Completed"
-            status.finished_at = datetime.now(UTC)
+            status.finished_at = datetime.now(timezone.utc)
             status.metrics = metrics
             await self.runs.save_status(status)
             await self.trace(
@@ -446,7 +446,7 @@ class ResearchPipeline:
         except Exception as exc:
             status.status = "failed"
             status.current_stage = "Failed"
-            status.finished_at = datetime.now(UTC)
+            status.finished_at = datetime.now(timezone.utc)
             status.error = str(exc)
             status.metrics = metrics
             await self.runs.save_status(status)
@@ -498,7 +498,7 @@ class ResearchPipeline:
         )
         status.status = "completed"
         status.current_stage = "QuickExtract"
-        status.finished_at = datetime.now(UTC)
+        status.finished_at = datetime.now(timezone.utc)
         status.metrics = RunMetrics(sources_fetched=1 if document.ok else 0, evidence_count=len(evidence))
         await self.runs.save_status(status)
         return status, evidence
@@ -593,7 +593,7 @@ class ResearchPipeline:
                 source_type=candidate.source_type or classify_source(candidate.url, candidate.title),
                 http_status=200,
                 content_hash=content_hash,
-                fetched_at=datetime.now(UTC),
+                fetched_at=datetime.now(timezone.utc),
                 parser=candidate.content_source or "provider_content",
                 provider=candidate.source_provider,
                 query=candidate.query,
@@ -1006,7 +1006,7 @@ class ResearchPipeline:
         event = TraceEvent(
             event_id=f"evt_{uuid4().hex[:12]}",
             run_id=run_id,
-            timestamp=datetime.now(UTC),
+            timestamp=datetime.now(timezone.utc),
             node=node,
             phase=phase,  # type: ignore[arg-type]
             status=status,
@@ -1037,7 +1037,7 @@ def build_dag_snapshot(plan: ResearchPlan) -> dict:
 def build_paper_pattern_matrix(
     evidence: list[Evidence], papers: list[str], dimensions: list[str]
 ) -> PaperPatternMatrix:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     evidence_by_cell: dict[tuple[str, str], list[Evidence]] = defaultdict(list)
     for ev in evidence:
         paper = ev.paper or detect_entity(ev.fact, ev.source_title, ev.source_url, papers)
@@ -1266,7 +1266,7 @@ def build_observability(
     matrix: PaperPatternMatrix,
     recommendations: list[OpportunityRecommendation],
 ) -> ObservabilitySnapshot:
-    now = datetime.now(UTC)
+    now = datetime.now(timezone.utc)
     source_mix = Counter(ev.source_type for ev in evidence)
     claim_pass_rate = metrics.verified_claim_count / max(1, metrics.claim_count)
     red_team_rate = metrics.challenged_claim_count / max(1, metrics.claim_count)
@@ -1398,7 +1398,7 @@ def build_evidence_graph(evidence: list[Evidence], claims: list[Claim]) -> Evide
                         weight=claim.confidence,
                     )
                 )
-    return EvidenceGraph(generated_at=datetime.now(UTC), nodes=list(nodes.values()), edges=edges)
+    return EvidenceGraph(generated_at=datetime.now(timezone.utc), nodes=list(nodes.values()), edges=edges)
 
 
 def extract_evidence_from_document(

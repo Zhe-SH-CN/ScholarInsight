@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
 from cg.repositories.base import atomic_write_json, read_json, read_jsonl, read_text
 from cg.schemas.research import (
-    BattlecardItem,
     Claim,
-    CompetitorMatrix,
+    PaperPatternMatrix,
     EvidenceGraph,
     EvidenceSummary,
     ObservabilitySnapshot,
@@ -40,7 +39,7 @@ class RunRepository:
         return self.runs_dir / run_id
 
     async def create(self, request: ResearchRequest, owner: str | None = None) -> RunStatus:
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         run_id = f"run_{now.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
         run_dir = self.run_dir(run_id)
         for subdir in RUN_SUBDIRS:
@@ -78,7 +77,7 @@ class RunRepository:
         status = await self.load_status(run_id)
         if status.status in {"queued", "running"}:
             stop_path = self.run_dir(run_id) / ".stop_requested"
-            stop_path.write_text(datetime.now(UTC).isoformat(), encoding="utf-8")
+            stop_path.write_text(datetime.now(timezone.utc).isoformat(), encoding="utf-8")
             status.current_stage = "Stopping"
             if "Stop requested by user." not in status.warnings:
                 status.warnings.append("Stop requested by user.")
@@ -92,7 +91,7 @@ class RunRepository:
         status = current_status or await self.load_status(run_id)
         status.status = "stopped"
         status.current_stage = "Stopped"
-        status.finished_at = datetime.now(UTC)
+        status.finished_at = datetime.now(timezone.utc)
         status.error = None
         for node, node_status in list(status.node_status.items()):
             if node_status == "running":
@@ -125,7 +124,7 @@ class RunRepository:
         self, stale_after_seconds: int, owner: str | None = None
     ) -> list[RunStatus]:
         statuses: list[RunStatus] = []
-        now = datetime.now(UTC)
+        now = datetime.now(timezone.utc)
         for status in await self.list_statuses(owner):
             if status.status != "running":
                 statuses.append(status)
@@ -176,7 +175,7 @@ class RunRepository:
             latest = max((path.stat().st_mtime for path in run_dir.rglob("*") if path.is_file()), default=0.0)
             if latest <= 0:
                 return None
-            return datetime.fromtimestamp(latest, UTC)
+            return datetime.fromtimestamp(latest, timezone.utc)
         except Exception:
             return None
 
