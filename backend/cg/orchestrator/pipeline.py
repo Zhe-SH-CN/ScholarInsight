@@ -3362,7 +3362,7 @@ def build_recommendations(
                 priority="high",
                 target_audience="researcher",
                 rationale=grounded_backing_text(lead_claim),
-                expected_value="把综述观察转化为带证据边界的可检验研究假设，降低选题阶段的主观跳跃。",
+                expected_value="把证据轴写成带边界的可检验问题，降低选题阶段的主观跳跃。",
                 based_on_claim_ids=[claim.claim_id for claim in strategic_claims[:3]],
                 evidence_ids=evidence_ids[:8],
                 next_steps=[
@@ -3475,22 +3475,21 @@ def build_recommendations(
 def grounded_opportunity_title(claim: Claim) -> str:
     dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
     if claim.claim_type == "cross_role_contrast":
-        return f"把{dimension}中的来源角色分工转化为可检验研究问题"
-    return f"将{dimension}中的多论文共识转化为可复现实验协议"
+        return f"{dimension}中的来源分工机制问题"
+    return f"{dimension}中的证据轴实验问题"
 
 
 def grounded_opportunity_text(request: ResearchRequest, claim: Claim) -> str:
     dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
     axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
     if claim.claim_type == "cross_role_contrast":
-        role_text = role_backing_phrase(claim)
         return (
-            f"围绕 {request.target_topic} 的 {dimension} 方向，构造一个检验“{axis}”的研究问题："
-            f"比较并连接 {role_text} 的证据分工，观察同一协议下的任务定义、方法机制和失败模式是否一致。"
+            f"围绕 {request.target_topic} 的{dimension}，把“{axis}”中的 source-role 分工设为机制变量；"
+            f"{submission_evaluation_plan(claim)}"
         )
     return (
-        f"围绕 {request.target_topic} 的 {dimension} 方向，把“{axis}”从综述性观察改写为可复现实验协议，"
-        "明确任务输入、评价指标、对照设置和失败判据。"
+        f"围绕 {request.target_topic} 的{dimension}，把“{axis}”设为可控实验变量；"
+        f"{submission_evaluation_plan(claim)}"
     )
 
 
@@ -4461,9 +4460,9 @@ def build_evidence_backed_opportunity_table(
         axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
         role_text = role_backing_phrase(claim) or "source role 尚未分组"
         if claim.claim_type == "cross_role_contrast":
-            next_step = "用同一任务协议检验不同 source role 的机制分工是否互补。"
+            next_step = "固定任务输入、指标和失败判据，加入/移除各 source role 对应机制。"
         else:
-            next_step = "把该证据轴固化为任务、指标、对照和失败判据。"
+            next_step = "设计 baseline、机制增强、消融和反例集。"
         rows.append(
             "|"
             + "|".join(
@@ -4676,13 +4675,13 @@ def build_grounded_hypotheses(
         axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
         if claim.claim_type == "cross_role_contrast":
             hypothesis = (
-                f"在 {request.target_topic} 的 {dimension} 中，检验不同 source role 在“{axis}”上的分工是否可以"
-                "形成同一套可复现评测或方法协议。"
+                f"在 {request.target_topic} 的{dimension}中，把“{axis}”中的 source-role 分工定义为机制变量，"
+                "检验不同来源角色在同一任务协议下是否互补。"
             )
         else:
             hypothesis = (
-                f"在 {request.target_topic} 的 {dimension} 中，将“{axis}”固化为可复现实验协议，"
-                "检验现有多论文共识是否能跨任务、数据集或方法设置保持成立。"
+                f"在 {request.target_topic} 的{dimension}中，把“{axis}”定义为可控实验变量，"
+                "检验该变量是否解释跨论文反复出现的能力边界。"
             )
         lines.extend(
             [

@@ -352,7 +352,10 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "**方法假设**：把“核心反事实推断”显式建模为 Counterfactual Inference 的可控实验变量" in report
     assert "**实验化验证**：以“核心反事实推断”为主轴" in report
     assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
-    assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
+    assert "### H1. 核心反事实推断中的证据轴实验问题" in report
+    assert "把“核心反事实推断”定义为可控实验变量" in report
+    assert "多论文共识转化为可复现实验协议" not in report
+    assert "现有多论文共识是否能跨任务" not in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
     assert "关注 report-ready evidence axis" in report
     assert "代表性支撑证据" in report
@@ -644,8 +647,10 @@ def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> Non
     )
 
     assert len(recommendations) == 1
-    assert recommendations[0].title == "将核心反事实推断中的多论文共识转化为可复现实验协议"
-    assert "可复现实验协议" in recommendations[0].recommendation
+    assert recommendations[0].title == "核心反事实推断中的证据轴实验问题"
+    assert "可控实验变量" in recommendations[0].recommendation
+    assert "多论文共识" not in recommendations[0].title
+    assert "综述性观察" not in recommendations[0].recommendation
     assert recommendations[0].rationale.startswith("这一综合判断由 4 篇独立论文")
 
 
