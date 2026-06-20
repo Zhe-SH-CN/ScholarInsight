@@ -332,6 +332,8 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     )
 
     assert "## 可检验研究假设与学术背书" in report
+    assert "## 证据背书机会表" in report
+    assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
     assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
     assert "该 claim" not in report
@@ -362,6 +364,45 @@ def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> Non
     assert recommendations[0].title == "将核心反事实推断中的多论文共识转化为可复现实验协议"
     assert "可复现实验协议" in recommendations[0].recommendation
     assert recommendations[0].rationale.startswith("这一综合判断由 4 篇独立论文")
+
+
+def test_report_matrix_prioritizes_report_ready_supporting_papers() -> None:
+    markdown = pipeline_module.build_matrix_markdown(
+        _large_matrix_for_report_ready(),
+        {},
+        focus_evidence_ids={"ev_ready_1", "ev_ready_2", "ev_ready_3", "ev_ready_4"},
+        max_papers=4,
+    )
+
+    header = markdown.splitlines()[0]
+    assert "Paper A" in header
+    assert "Paper B" in header
+    assert "Paper C" in header
+    assert "Paper D" in header
+    assert "Paper E" not in header
+    assert "完整 matrix" in markdown
+
+
+def test_dimension_fallback_does_not_expand_unknown_cells() -> None:
+    lines = pipeline_module.build_dimension_fallback_points(
+        [
+            MatrixCell(
+                paper="Paper With No Evidence",
+                dimension="core_counterfactual_inference",
+                dimension_label="Core Counterfactual Inference",
+                summary="尚未在本次公开资料中找到 Paper With No Evidence 的核心反事实推断强证据。",
+                evidence_count=0,
+                confidence=0.0,
+                source_types=[],
+                evidence_ids=[],
+                status="unknown",
+            )
+        ]
+    )
+
+    rendered = "\n".join(lines)
+    assert "暂无可引用证据" in rendered
+    assert "Paper With No Evidence 的核心反事实推断强证据" not in rendered
 
 
 def _evidence() -> Evidence:
@@ -523,6 +564,42 @@ def _matrix_for_report_ready() -> PaperPatternMatrix:
             ]
         ],
         coverage_by_paper={"Paper A": 1.0, "Paper B": 1.0, "Paper C": 1.0, "Paper D": 1.0},
+        coverage_by_dimension={"core_counterfactual_inference": 1.0},
+    )
+
+
+def _large_matrix_for_report_ready() -> PaperPatternMatrix:
+    papers = [f"Paper {letter}" for letter in "ABCDEFGH"]
+    evidence_ids = [
+        "ev_ready_1",
+        "ev_ready_2",
+        "ev_ready_3",
+        "ev_ready_4",
+        "ev_extra_5",
+        "ev_extra_6",
+        "ev_extra_7",
+        "ev_extra_8",
+    ]
+    return PaperPatternMatrix(
+        generated_at=datetime.now(timezone.utc),
+        papers=papers,
+        dimensions=["core_counterfactual_inference"],
+        dimension_labels={"core_counterfactual_inference": "Core Counterfactual Inference"},
+        cells=[
+            MatrixCell(
+                paper=paper,
+                dimension="core_counterfactual_inference",
+                dimension_label="Core Counterfactual Inference",
+                summary=f"{paper} contributes evidence about counterfactual inference assumptions.",
+                evidence_count=1,
+                confidence=0.82,
+                source_types=["academic_paper"],
+                evidence_ids=[evidence_id],
+                status="strong",
+            )
+            for paper, evidence_id in zip(papers, evidence_ids)
+        ],
+        coverage_by_paper={paper: 1.0 for paper in papers},
         coverage_by_dimension={"core_counterfactual_inference": 1.0},
     )
 

@@ -4035,11 +4035,19 @@ def build_analysis_report(
         "",
         "## 推理模式对比矩阵",
         "",
-        build_matrix_markdown(matrix, citation_numbers),
+        build_matrix_markdown(
+            matrix,
+            citation_numbers,
+            focus_evidence_ids=report_ready_support_evidence_ids(claims),
+        ),
         "",
         "### 矩阵解读",
         "",
         *build_matrix_insights(matrix),
+        "",
+        "## 证据背书机会表",
+        "",
+        *build_evidence_backed_opportunity_table(request, claims, citation_numbers),
         "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
@@ -4207,6 +4215,61 @@ def citations_for_ids(evidence_ids: list[str], citation_numbers: dict[str, int],
         if len(numbers) >= limit:
             break
     return "".join(f"[{number}]" for number in numbers)
+
+
+def report_ready_support_evidence_ids(claims: list[Claim]) -> set[str]:
+    return {
+        evidence_id
+        for claim in claims
+        if is_report_ready_claim(claim)
+        for evidence_id in claim.supporting_evidence_ids
+    }
+
+
+def build_evidence_backed_opportunity_table(
+    request: ResearchRequest,
+    claims: list[Claim],
+    citation_numbers: dict[str, int],
+    limit: int = 4,
+) -> list[str]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            item.confidence,
+        ),
+        reverse=True,
+    )[:limit]
+    if not ready_claims:
+        return ["当前尚无足够 report-ready synthesis 形成机会表；应先补充核心论文和反例证据。"]
+
+    rows = [
+        "| 机会 | 证据轴 | 学术背书 | 下一步验证 |",
+        "|---|---|---|---|",
+    ]
+    for claim in ready_claims:
+        citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=3)
+        axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+        role_text = role_backing_phrase(claim) or "source role 尚未分组"
+        if claim.claim_type == "cross_role_contrast":
+            next_step = "用同一任务协议检验不同 source role 的机制分工是否互补。"
+        else:
+            next_step = "把该证据轴固化为任务、指标、对照和失败判据。"
+        rows.append(
+            "|"
+            + "|".join(
+                csv_safe_markdown(value)
+                for value in [
+                    grounded_opportunity_title(claim),
+                    compact_fact(axis, 90),
+                    f"{claim.source_paper_count} 篇独立论文；{role_text}{citations}",
+                    next_step,
+                ]
+            )
+            + "|"
+        )
+    return rows
 
 
 def build_grounded_hypotheses(
@@ -4389,10 +4452,13 @@ def build_matrix_insights(matrix: PaperPatternMatrix) -> list[str]:
         laggards = [cell for cell in cells if cell.status in {"weak", "unknown"}]
         sentence = (
             f"- **{matrix.dimension_labels.get(dimension, dimension)}**："
-            f"{leader.paper} 当前证据最强（{leader.evidence_count} 条，置信度 {leader.confidence:.2f}）。"
+            f"{compact_paper_title(leader.paper)} 当前证据最强（{leader.evidence_count} 条，置信度 {leader.confidence:.2f}）。"
         )
         if laggards:
-            sentence += " 需要补证：" + "、".join(f"{cell.paper}({cell.evidence_count}条)" for cell in laggards[:3]) + "。"
+            sentence += " 需要补证：" + "、".join(
+                f"{compact_paper_title(cell.paper, 38)}({cell.evidence_count}条)"
+                for cell in laggards[:3]
+            ) + "。"
         else:
             sentence += " 该推理模式已有可用证据，适合进入横向对比。"
         lines.append(sentence)
@@ -4404,13 +4470,20 @@ def build_dimension_overview(dimension: str, cells: list[MatrixCell]) -> list[st
         return ["当前维度暂无矩阵证据。", ""]
     label = DIMENSION_LABELS.get(dimension, dimension)
     total = sum(cell.evidence_count for cell in cells)
-    strong = [cell for cell in cells if cell.status == "strong"]
-    weak = [cell for cell in cells if cell.status in {"weak", "unknown"}]
+    strong = sorted(
+        [cell for cell in cells if cell.status == "strong"],
+        key=lambda cell: (cell.evidence_count, cell.confidence),
+        reverse=True,
+    )
+    weak = sorted(
+        [cell for cell in cells if cell.status in {"weak", "unknown"}],
+        key=lambda cell: (cell.status == "unknown", -cell.evidence_count),
+    )
     lines = [
         (
             f"该维度共关联 {total} 条 Evidence；"
-            f"强覆盖论文：{'、'.join(cell.paper for cell in strong) or '暂无'}；"
-            f"待补证论文：{'、'.join(cell.paper for cell in weak) or '暂无'}。"
+            f"强覆盖论文：{compact_paper_names(strong) or '暂无'}；"
+            f"待补证论文：{compact_paper_names(weak) or '暂无'}。"
         )
     ]
     if cells:
@@ -4418,6 +4491,19 @@ def build_dimension_overview(dimension: str, cells: list[MatrixCell]) -> list[st
         lines.append(f"{label}当前最可引用的对比锚点是：{best.summary}")
     lines.append("")
     return lines
+
+
+def compact_paper_names(cells: list[MatrixCell], limit: int = 3) -> str:
+    if not cells:
+        return ""
+    names = [cell.paper for cell in cells[:limit]]
+    if len(cells) > limit:
+        names.append(f"等 {len(cells)} 篇")
+    return "、".join(names)
+
+
+def compact_paper_title(title: str, max_len: int = 56) -> str:
+    return compact_fact(title, max_len)
 
 
 def build_dimension_fallback_points(
@@ -4428,7 +4514,14 @@ def build_dimension_fallback_points(
         return ["- 当前没有抽取到足够证据形成结论。", ""]
     citation_numbers = citation_numbers or {}
     lines: list[str] = []
-    for cell in sorted(cells, key=lambda item: item.evidence_count, reverse=True)[:5]:
+    evidence_cells = [
+        cell
+        for cell in cells
+        if cell.evidence_count > 0 and cell.status != "unknown"
+    ]
+    if not evidence_cells:
+        return ["- 当前维度暂无可引用证据；不应把缺失格写成论文层面的负结论。", ""]
+    for cell in sorted(evidence_cells, key=lambda item: item.evidence_count, reverse=True)[:5]:
         cite = citations_for_ids(cell.evidence_ids, citation_numbers)
         lines.append(
             f"- **{cell.paper}**：{cell.summary} "
@@ -4550,25 +4643,58 @@ def gate_status(score: float, pass_threshold: float, fail_threshold: float) -> s
 def build_matrix_markdown(
     matrix: PaperPatternMatrix,
     citation_numbers: dict[str, int] | None = None,
+    focus_evidence_ids: set[str] | None = None,
+    max_papers: int = 6,
 ) -> str:
     citation_numbers = citation_numbers or {}
-    headers = ["维度", *matrix.papers]
+    papers = select_report_matrix_papers(matrix, focus_evidence_ids or set(), max_papers)
+    headers = ["维度", *papers]
     rows = ["|" + "|".join(headers) + "|", "|" + "|".join(["---"] * len(headers)) + "|"]
     by_key = {(cell.paper, cell.dimension): cell for cell in matrix.cells}
     for dimension in matrix.dimensions:
         row = [matrix.dimension_labels.get(dimension, dimension)]
-        for paper in matrix.papers:
+        for paper in papers:
             cell = by_key.get((paper, dimension))
-            if not cell:
+            if not cell or cell.status == "unknown" or cell.evidence_count <= 0:
                 row.append("暂无")
             else:
-                summary = cell.summary
-                if len(summary) > 130:
-                    summary = summary[:127] + "..."
+                summary = compact_fact(cell.summary, 72)
                 cite = citations_for_ids(cell.evidence_ids, citation_numbers, limit=2)
-                row.append(f"{cell.status} · {cell.confidence:.2f}<br/>{summary}{cite}")
+                row.append(f"{cell.status} · {cell.evidence_count}条 · {cell.confidence:.2f}<br/>{summary}{cite}")
         rows.append("|" + "|".join(csv_safe_markdown(value) for value in row) + "|")
+    if len(papers) < len(matrix.papers):
+        rows.extend(
+            [
+                "",
+                f"> 为保证报告可读性，此处仅展示 {len(papers)} 篇与 report-ready evidence 最相关的论文；完整 matrix 请查看 `exports/matrix.json` 或 `exports/matrix.csv`。",
+            ]
+        )
     return "\n".join(rows)
+
+
+def select_report_matrix_papers(
+    matrix: PaperPatternMatrix,
+    focus_evidence_ids: set[str],
+    max_papers: int = 6,
+) -> list[str]:
+    if len(matrix.papers) <= max_papers:
+        return matrix.papers
+
+    paper_scores: dict[str, tuple[int, int, float, float]] = {}
+    for paper in matrix.papers:
+        cells = [cell for cell in matrix.cells if cell.paper == paper]
+        focus_hits = sum(len(set(cell.evidence_ids) & focus_evidence_ids) for cell in cells)
+        evidence_count = sum(cell.evidence_count for cell in cells)
+        coverage = sum(coverage_points(cell) for cell in cells)
+        confidence = average([cell.confidence for cell in cells])
+        paper_scores[paper] = (focus_hits, evidence_count, coverage, confidence)
+
+    selected = sorted(
+        matrix.papers,
+        key=lambda paper: paper_scores.get(paper, (0, 0, 0, 0)),
+        reverse=True,
+    )[:max_papers]
+    return selected or matrix.papers[:max_papers]
 
 
 def csv_safe_markdown(value: str) -> str:
