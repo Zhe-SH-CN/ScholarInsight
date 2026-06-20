@@ -59,7 +59,9 @@ def test_canonical_title_recovers_acl_proceedings_metadata() -> None:
         "GNN-RAG: Graph Neural Retrieval for Efficient Large Language Model "
         "Reasoning on Knowledge Graphs"
     )
-    assert _index()._topic_rejection_reason("RAG with Knowledge Graphs", paper) == ""
+    assert _index()._topic_rejection_reason("RAG with Knowledge Graphs", paper) == (
+        "RAG+KG query excludes KGQA/graph reasoning papers unless they introduce a KG-RAG method"
+    )
 
 
 def test_canonical_title_extends_truncated_title() -> None:
@@ -269,7 +271,7 @@ def test_rag_kg_subtype_keeps_graphrag_with_local_kg_construction() -> None:
     ) == ""
 
 
-def test_rag_kg_subtype_marks_application_without_rejecting() -> None:
+def test_rag_kg_subtype_rejects_application_only_papers() -> None:
     paper = {
         "title": "Knowledge Graph Retrieval-Augmented Generation for LLM-based Recommendation",
         "abstract": (
@@ -287,12 +289,14 @@ def test_rag_kg_subtype_marks_application_without_rejecting() -> None:
     )
 
     assert subtype.label == "application_case"
-    assert subtype.rejection_reason == ""
+    assert subtype.rejection_reason == (
+        "RAG+KG query excludes application-only KG-RAG papers from core evidence extraction"
+    )
     assert _index()._topic_rejection_reason(
         "RAG with Knowledge Graphs limitations",
         paper,
         target_topic="RAG with Knowledge Graphs",
-    ) == ""
+    ) == subtype.rejection_reason
 
 
 def test_rag_kg_subtype_separates_kgqa_graph_reasoning() -> None:
@@ -313,7 +317,42 @@ def test_rag_kg_subtype_separates_kgqa_graph_reasoning() -> None:
     )
 
     assert subtype.label == "kgqa_or_graph_reasoning"
-    assert subtype.rejection_reason == ""
+    assert subtype.rejection_reason == (
+        "RAG+KG query excludes KGQA/graph reasoning papers unless they introduce a KG-RAG method"
+    )
+    assert _index()._topic_rejection_reason(
+        "RAG with Knowledge Graphs hallucination mitigation",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    ) == "RAG+KG query requires title-level RAG and graph signal"
+
+
+def test_rag_kg_subtype_rejects_boundary_rag_without_core_method_or_benchmark() -> None:
+    paper = {
+        "title": "Can Knowledge-Graph-based Retrieval Augmented Generation Really Retrieve What You Need?",
+        "abstract": (
+            "The paper discusses retrieval augmented generation and knowledge graphs "
+            "and analyzes whether retrieved graph context matches user needs."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/kg_rag_boundary.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "RAG with Knowledge Graphs limitations",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert subtype.label == "rag_kg_adjacent"
+    assert subtype.rejection_reason == (
+        "RAG+KG query requires an explicit KG-RAG method or benchmark/analysis framing"
+    )
+    assert _index()._topic_rejection_reason(
+        "RAG with Knowledge Graphs limitations",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    ) == subtype.rejection_reason
 
 
 def test_scientific_reasoning_gate_classifies_equation_discovery_benchmark() -> None:
@@ -1073,4 +1112,33 @@ def test_multi_hop_target_topic_overrides_rag_kg_classifier() -> None:
         "retrieval augmented generation knowledge graph traversal efficient RAG multi-hop question answering",
         paper,
         target_topic="Multi-hop Reasoning on Graphs",
-    ) == ""
+    ) == subtype.rejection_reason
+
+
+def test_multi_hop_graph_gate_rejects_hoprag_retrieval_adjacent() -> None:
+    paper = {
+        "title": "HopRAG: Multi-Hop Reasoning for Logic-Aware Retrieval-Augmented Generation",
+        "abstract": (
+            "The system connects multi-hop reasoning with retrieval-augmented generation, "
+            "but the paper is a graph retrieval RAG framework rather than a graph "
+            "reasoning benchmark with standalone path-composition evaluation."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/hoprag.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "multi-hop graph reasoning retrieval path-based reasoning benchmark",
+        paper,
+        target_topic="Multi-hop Reasoning on Graphs",
+    )
+
+    assert subtype.label == "graph_retrieval_rag_adjacent"
+    assert subtype.rejection_reason == (
+        "Multi-hop graph reasoning query excludes graph-RAG/retrieval papers unless they directly benchmark graph reasoning"
+    )
+    assert _index()._topic_rejection_reason(
+        "multi-hop graph reasoning retrieval path-based reasoning benchmark",
+        paper,
+        target_topic="Multi-hop Reasoning on Graphs",
+    ) == subtype.rejection_reason

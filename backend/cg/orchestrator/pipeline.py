@@ -2292,6 +2292,31 @@ CLUSTER_HINTS: dict[str, tuple[str, ...]] = {
         "hop reasoning",
         "multi-hop reasoning",
     ),
+    "math_proof_verification_protocol": (
+        "formal proof",
+        "formal proofs",
+        "formal verification",
+        "proof verification",
+        "proof checking",
+        "proof correctness",
+        "proof assistant",
+        "theorem proving",
+        "natural language math proof",
+        "natural language math proofs",
+        "ground-truth proof",
+        "lean proof",
+        "lean",
+    ),
+    "math_benchmark_problem_protocol": (
+        "gsm8k",
+        "math benchmark",
+        "mathematical benchmark",
+        "word problem",
+        "word problems",
+        "grade school arithmetic",
+        "olympiad-level",
+        "olympiad",
+    ),
 }
 
 CLUSTER_LABELS: dict[str, str] = {
@@ -2308,6 +2333,24 @@ CLUSTER_LABELS: dict[str, str] = {
     "counterfactual_identifiability_assumption": "counterfactual identifiability and assumptions",
     "kgqa_semantic_parsing_pipeline": "KGQA and semantic parsing pipeline",
     "path_composition_graph_reasoning": "path composition and graph traversal",
+    "math_proof_verification_protocol": "mathematical proof verification protocol",
+    "math_benchmark_problem_protocol": "mathematical benchmark/problem protocol",
+}
+
+CLUSTER_DIMENSION_OVERRIDES: dict[str, str] = {
+    "math_proof_verification_protocol": "formal_proof_symbolic_reasoning",
+    "math_benchmark_problem_protocol": "math_benchmark_evaluation",
+}
+
+MATH_CLUSTER_KEYS = set(CLUSTER_DIMENSION_OVERRIDES)
+
+MATH_DIMENSIONS = {
+    "math_benchmark_evaluation",
+    "formal_proof_symbolic_reasoning",
+    "program_tool_augmented_solving",
+    "self_consistency_search_verification",
+    "natural_language_to_formal_math",
+    "math_error_diagnosis",
 }
 
 CLUSTER_STOPWORDS = {
@@ -2393,8 +2436,12 @@ def build_evidence_clusters(evidence: list[Evidence], claims: list[Claim] | None
     grouped: dict[tuple[str, str], list[Evidence]] = defaultdict(list)
     labels: dict[tuple[str, str], str] = {}
     for ev in evidence:
-        dimension = ev.dimension or "other"
         key, label = evidence_cluster_key(ev)
+        dimension = (
+            CLUSTER_DIMENSION_OVERRIDES.get(key, ev.dimension or "other")
+            if ev.dimension in MATH_DIMENSIONS
+            else ev.dimension or "other"
+        )
         grouped[(dimension, key)].append(ev)
         labels[(dimension, key)] = label
 
@@ -2609,6 +2656,8 @@ def cluster_axis_phrase(label: str) -> str:
         "counterfactual identifiability and assumptions": "可识别性条件、结构因果假设、混杂处理或反事实查询约束",
         "KGQA and semantic parsing pipeline": "KGQA 任务形式、语义解析、逻辑形式生成或可执行查询构造",
         "path composition and graph traversal": "多跳路径组合、图遍历、关系链搜索或路径级推理控制",
+        "mathematical proof verification protocol": "形式证明、证明检查、Lean/证明助手验证或证明正确性评估",
+        "mathematical benchmark/problem protocol": "数学题集、GSM8K/MATH 类基准、奥赛题或 word-problem 评测协议",
     }.get(label, label)
 
 
@@ -2667,12 +2716,38 @@ def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
             "kgqa_semantic_parsing_pipeline",
             "modular_system_pipeline",
         ],
+        "math_benchmark_evaluation": [
+            "math_benchmark_problem_protocol",
+            "math_proof_verification_protocol",
+            "evaluation_benchmark",
+        ],
+        "formal_proof_symbolic_reasoning": [
+            "math_proof_verification_protocol",
+            "representation_formalization",
+            "verification_reward",
+        ],
+        "program_tool_augmented_solving": [
+            "math_proof_verification_protocol",
+            "modular_system_pipeline",
+            "data_generation_training",
+        ],
+        "self_consistency_search_verification": [
+            "math_proof_verification_protocol",
+            "search_inference_control",
+            "verification_reward",
+        ],
+        "natural_language_to_formal_math": [
+            "math_proof_verification_protocol",
+            "representation_formalization",
+        ],
     }.get(ev.dimension, [])
     for key in preferred_keys:
         hints = CLUSTER_HINTS.get(key, ())
         if any(hint in text for hint in hints):
             return key, CLUSTER_LABELS[key]
     for key, hints in CLUSTER_HINTS.items():
+        if key in MATH_CLUSTER_KEYS and ev.dimension not in MATH_DIMENSIONS:
+            continue
         if any(hint in text for hint in hints):
             return key, CLUSTER_LABELS[key]
     tokens = [

@@ -902,6 +902,18 @@ class LocalPaperIndex:
             or (title_has_rag_acronym and title_graph_signal)
         )
 
+        boundary_analysis_markers = (
+            "really retrieve what you need",
+            "can knowledge-graph-based retrieval augmented generation",
+            "can knowledge graph based retrieval augmented generation",
+        )
+        if any(marker in title_compact for marker in boundary_analysis_markers):
+            return SourceSubtype(
+                "rag_kg_adjacent",
+                "paper analyzes a KG-RAG boundary question without a core method or benchmark framing",
+                "RAG+KG query requires an explicit KG-RAG method or benchmark/analysis framing",
+            )
+
         kg_construction_markers = (
             "knowledge graph construction",
             "knowledge graph extraction",
@@ -950,6 +962,7 @@ class LocalPaperIndex:
             return SourceSubtype(
                 "kgqa_or_graph_reasoning",
                 "paper centers KGQA, graph reasoning, or KG prompting rather than a KG-RAG method",
+                "RAG+KG query excludes KGQA/graph reasoning papers unless they introduce a KG-RAG method",
             )
 
         application_markers = (
@@ -968,7 +981,8 @@ class LocalPaperIndex:
         if any(marker in primary_compact for marker in application_markers):
             return SourceSubtype(
                 "application_case",
-                "paper studies KG-RAG in a specific application domain; use as supporting evidence",
+                "paper studies KG-RAG in a specific application domain",
+                "RAG+KG query excludes application-only KG-RAG papers from core evidence extraction",
             )
 
         benchmark_markers = (
@@ -992,6 +1006,7 @@ class LocalPaperIndex:
         return SourceSubtype(
             "rag_kg_adjacent",
             "paper has RAG and knowledge graph signals but lacks a strong KG-RAG method marker",
+            "RAG+KG query requires an explicit KG-RAG method or benchmark/analysis framing",
         )
 
     def _topic_family(self, query: str) -> str:
@@ -1794,6 +1809,7 @@ class LocalPaperIndex:
             return SourceSubtype(
                 "graph_retrieval_rag_adjacent",
                 "paper connects graph reasoning with retrieval-augmented generation",
+                "Multi-hop graph reasoning query excludes graph-RAG/retrieval papers unless they directly benchmark graph reasoning",
             )
         return SourceSubtype(
             "core_multi_hop_graph_reasoning",

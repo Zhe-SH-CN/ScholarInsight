@@ -547,6 +547,81 @@ def test_multi_hop_kgqa_evidence_uses_topic_specific_cluster_key() -> None:
     }
 
 
+def test_math_proof_verification_evidence_uses_topic_specific_cluster_key() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Proof Paper A",
+            "math_benchmark_evaluation",
+            "The benchmark evaluates natural language math proofs with proof verification.",
+            source_subtype="formal_math_proving",
+        ),
+        _evidence(
+            "ev_b1",
+            "Proof Paper B",
+            "formal_proof_symbolic_reasoning",
+            "The method uses Lean proof assistants for formal proof checking.",
+            source_subtype="formal_math_proving",
+        ),
+        _evidence(
+            "ev_c1",
+            "Proof Paper C",
+            "self_consistency_search_verification",
+            "The verifier checks theorem proving steps against ground-truth proof structure.",
+            source_subtype="formal_math_proving",
+        ),
+        _evidence(
+            "ev_d1",
+            "Proof Paper D",
+            "natural_language_to_formal_math",
+            "The system translates natural language math proofs into formal verification targets.",
+            source_subtype="formal_math_proving",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+
+    assert len(clusters) == 1
+    assert clusters[0].dimension == "formal_proof_symbolic_reasoning"
+    assert clusters[0].label == "mathematical proof verification protocol"
+    assert clusters[0].independent_paper_count == 4
+    assert len(report_ready) == 1
+    assert report_ready[0].supporting_source_subtype_paper_counts == {
+        "formal_math_proving": 4
+    }
+
+
+def test_math_cluster_keys_do_not_override_non_math_dimensions() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Causal Paper A",
+            "llm_causal_benchmarking",
+            "The paper mentions Lean proof checking only as an unrelated example.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Causal Paper B",
+            "llm_causal_benchmarking",
+            "The evaluation discusses proof verification as a contrastive task.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+    ]
+
+    clusters = build_evidence_clusters(evidence)
+
+    assert {cluster.dimension for cluster in clusters} == {"llm_causal_benchmarking"}
+    assert "mathematical proof verification protocol" not in {
+        cluster.label for cluster in clusters
+    }
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),
