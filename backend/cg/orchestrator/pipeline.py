@@ -4053,6 +4053,10 @@ def build_analysis_report(
         "",
         *build_formal_evidence_gate(claims, citation_numbers),
         "",
+        "## 可投稿研究命题与实验化路径",
+        "",
+        *build_submission_framing(request, claims, citation_numbers),
+        "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
         "### 已具备的优势",
@@ -4497,7 +4501,11 @@ def build_formal_evidence_gate(
         "|---|---|---|---|---|",
     ]
     for claim in ready_claims:
-        axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+        axis = (
+            cluster_axis_phrase(claim.evidence_cluster_label)
+            if claim.evidence_cluster_label
+            else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+        )
         certificate = formal_gate_certificate(claim)
         citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=4)
         lines.append(
@@ -4534,6 +4542,98 @@ def formal_gate_certificate(claim: Claim) -> str:
     return (
         f"verified; |E_c|={evidence_count}; |P_c|={claim.source_paper_count}; "
         f"roles={role_text}; support={claim.evidence_support_level}"
+    )
+
+
+def build_submission_framing(
+    request: ResearchRequest,
+    claims: list[Claim],
+    citation_numbers: dict[str, int],
+    limit: int = 3,
+) -> list[str]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            len(item.supporting_evidence_ids),
+            item.confidence,
+        ),
+        reverse=True,
+    )[:limit]
+    if not ready_claims:
+        return [
+            "当前尚无可进入主体的 report-ready synthesis；不应包装成投稿命题，应先补充核心论文、反例和可复现实验协议。"
+        ]
+
+    lines: list[str] = []
+    for index, claim in enumerate(ready_claims, start=1):
+        citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=4)
+        lines.extend(
+            [
+                f"### P{index}. {submission_framing_title(claim)}",
+                "",
+                f"- **问题定义**：{submission_problem_statement(request, claim)}{citations}",
+                f"- **方法假设**：{submission_method_hypothesis(request, claim)}",
+                f"- **实验化验证**：{submission_evaluation_plan(claim)}",
+                "- **边界条件**：该命题只继承 report-ready evidence 的范围；正式写作前必须补充反例论文、消融实验和人工原文复核。",
+                "",
+            ]
+        )
+    return lines
+
+
+def submission_framing_title(claim: Claim) -> str:
+    dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+    if claim.claim_type == "cross_role_contrast":
+        return f"把{dimension}中的来源分工转化为可投稿问题"
+    return f"把{dimension}中的证据轴转化为可投稿问题"
+
+
+def submission_problem_statement(request: ResearchRequest, claim: Claim) -> str:
+    dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+    axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
+    role_text = role_backing_phrase(claim) or f"{claim.source_paper_count} 篇独立论文"
+    scope = f"{request.target_topic} 的{dimension}"
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            f"在 {scope} 中，当前证据不是支持一个宽泛领域趋势，"
+            f"而是暴露出围绕“{axis}”的 source-role 分工；已有 {role_text} 支撑。"
+        )
+    return (
+        f"在 {scope} 中，当前证据不是支持泛化结论，"
+        f"而是指向一个可被任务化的“{axis}”瓶颈；已有 {role_text} 支撑。"
+    )
+
+
+def submission_method_hypothesis(request: ResearchRequest, claim: Claim) -> str:
+    dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+    axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            f"把不同 source role 的贡献拆成协议变量，构造一个覆盖{dimension}的统一 benchmark，"
+            f"检验“{axis}”中的任务定义、方法机制和失败模式是否能在同一设置下互补。"
+        )
+    return (
+        f"把“{axis}”显式建模为 {request.target_topic} 的可控实验变量，"
+        f"检验它是否解释{dimension}中跨论文反复出现的能力边界。"
+    )
+
+
+def submission_evaluation_plan(claim: Claim) -> str:
+    axis = (
+        cluster_axis_phrase(claim.evidence_cluster_label)
+        if claim.evidence_cluster_label
+        else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+    )
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            f"以“{axis}”为主轴，固定任务输入、指标和失败判据，分别加入/移除各 source role 对应的机制，"
+            "报告跨角色互补性、冲突点和负例。"
+        )
+    return (
+        f"以“{axis}”为主轴，设计同一任务下的 baseline、机制增强、消融和反例集，"
+        "只在独立论文证据与实验结果一致时写成贡献。"
     )
 
 

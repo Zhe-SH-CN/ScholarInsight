@@ -339,6 +339,11 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "\\|E_c\\|=4" in report
     assert "\\|P_c\\|=4" in report
     assert "support=strong" in report
+    assert "## 可投稿研究命题与实验化路径" in report
+    assert "### P1. 把核心反事实推断中的证据轴转化为可投稿问题" in report
+    assert "**问题定义**：在 Counterfactual Inference 的核心反事实推断 中" in report
+    assert "**方法假设**：把“核心反事实推断”显式建模为 Counterfactual Inference 的可控实验变量" in report
+    assert "**实验化验证**：以“核心反事实推断”为主轴" in report
     assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
     assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
@@ -397,6 +402,59 @@ def test_formal_evidence_gate_records_cross_role_minimum_certificate() -> None:
     assert "scientific reasoning benchmark:2" in gate
     assert "scientific discovery agent/workflow:2" in gate
     assert "g(c)=1，可进入主体" in gate
+
+
+def test_submission_framing_keeps_cross_role_contrast_as_research_problem() -> None:
+    claim = Claim(
+        claim_id="claim_cross_role_submission",
+        run_id="run_test",
+        dimension="formal_proof_symbolic_reasoning",
+        dimension_label="形式证明与符号推理",
+        claim=(
+            "在形式证明与符号推理维度，4 篇论文共同围绕 mathematical proof verification protocol "
+            "形成来源角色分工对照。"
+        ),
+        supporting_evidence_ids=["ev_a", "ev_b", "ev_c", "ev_d"],
+        confidence=0.9,
+        risk_level="low",
+        reasoning_summary="Supported by two proof papers and two benchmark papers.",
+        verification_status="verified",
+        claim_type="cross_role_contrast",
+        source_paper_count=4,
+        evidence_support_level="strong",
+        supporting_source_subtypes=[
+            "formal_math_proving",
+            "math_reasoning_benchmark",
+        ],
+        supporting_source_subtype_counts={
+            "formal_math_proving": 2,
+            "math_reasoning_benchmark": 2,
+        },
+        supporting_source_subtype_paper_counts={
+            "formal_math_proving": 2,
+            "math_reasoning_benchmark": 2,
+        },
+        evidence_cluster_label="mathematical proof verification protocol",
+    )
+    request = ResearchRequest(
+        project_name="Submission framing regression",
+        target_topic="Mathematical Reasoning",
+        analysis_dimensions=["formal_proof_symbolic_reasoning"],
+    )
+
+    framing = "\n".join(
+        pipeline_module.build_submission_framing(
+            request,
+            [claim],
+            {"ev_a": 1, "ev_b": 2, "ev_c": 3, "ev_d": 4},
+        )
+    )
+
+    assert "### P1. 把形式证明与符号推理中的来源分工转化为可投稿问题" in framing
+    assert "source-role 分工" in framing
+    assert "formal math proving 2 篇；mathematical reasoning benchmark 2 篇" in framing
+    assert "构造一个覆盖形式证明与符号推理的统一 benchmark" in framing
+    assert "分别加入/移除各 source role 对应的机制" in framing
 
 
 def test_analysis_report_does_not_promote_audit_only_representative_evidence() -> None:
