@@ -1494,6 +1494,7 @@ class ResearchPipeline:
     ) -> list[dict[str, str]]:
         composer = ReportComposerAgent(self.agent_context(run_id))
         fallbacks: list[dict[str, str]] = []
+        run_dir = self.runs.run_dir(run_id)
 
         async def run_section(
             section: str,
@@ -1536,6 +1537,8 @@ class ResearchPipeline:
             ),
             build_analysis_report(request, evidence, claims, metrics, matrix, recommendations, observability),
         )
+        await write_text(run_dir / "reports" / "report.md", report)
+
         executive_summary = await run_section(
             "executive_summary",
             "执行摘要",
@@ -1550,6 +1553,8 @@ class ResearchPipeline:
             ),
             build_executive_summary(request, metrics, observability, recommendations),
         )
+        await write_text(run_dir / "reports" / "executive_summary.md", executive_summary)
+
         methodology = await run_section(
             "methodology",
             "方法说明",
@@ -1563,9 +1568,6 @@ class ResearchPipeline:
             ),
             build_methodology(request, observability),
         )
-        run_dir = self.runs.run_dir(run_id)
-        await write_text(run_dir / "reports" / "report.md", report)
-        await write_text(run_dir / "reports" / "executive_summary.md", executive_summary)
         await write_text(run_dir / "reports" / "methodology.md", methodology)
         if fallbacks:
             await atomic_write_json(run_dir / "reports" / "report_fallbacks.json", fallbacks)

@@ -600,6 +600,36 @@ def test_causal_reasoning_llm_gate_rejects_opinion_alignment_drift() -> None:
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_bias_evaluation_instability_drift() -> None:
+    paper = {
+        "title": "Unmasking Style Sensitivity: A Causal Analysis of Bias Evaluation Instability in Large Language Models",
+        "abstract": (
+            "The paper studies how stylistic variations and text style transformations "
+            "affect bias evaluation metrics across large language models. It uses "
+            "causal inference techniques to disentangle content and style effects, "
+            "but it does not evaluate causal or counterfactual reasoning ability."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/unmasking_style_sensitivity.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs prompt sensitivity and robustness",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+    assert _index()._topic_rejection_reason(
+        "Causal Reasoning with LLMs prompt sensitivity and robustness",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    ) == subtype.rejection_reason
+
+
 def test_causal_reasoning_llm_gate_rejects_cot_computational_graph_drift() -> None:
     paper = {
         "title": "Verifying Chain-of-Thought Reasoning via Its Computational Graph",

@@ -36,6 +36,22 @@ class FailingReportComposer:
         return "# Methodology\n\nLLM methodology succeeded.\n"
 
 
+class IncrementalReportComposer:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def write(self, *args, **kwargs) -> str:
+        return "# Report\n\nLLM report succeeded.\n"
+
+    async def write_executive_summary(self, *args, **kwargs) -> str:
+        return "# Summary\n\nLLM summary succeeded.\n"
+
+    async def write_methodology(self, *args, **kwargs) -> str:
+        assert (self.ctx.run_dir / "reports" / "report.md").exists()
+        assert (self.ctx.run_dir / "reports" / "executive_summary.md").exists()
+        return "# Methodology\n\nLLM methodology succeeded.\n"
+
+
 @pytest.mark.asyncio
 async def test_write_report_falls_back_and_records_trace(
     tmp_path: Path,
@@ -102,6 +118,60 @@ async def test_write_report_falls_back_and_records_trace(
     assert "report_step_failed" in trace_statuses
     assert "report_step_fallback" in trace_statuses
     assert "reports_written" in trace_statuses
+
+
+@pytest.mark.asyncio
+async def test_write_report_persists_sections_incrementally(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(pipeline_module, "ReportComposerAgent", IncrementalReportComposer)
+    pipeline = pipeline_module.ResearchPipeline(
+        Settings(
+            cg_data_dir=str(tmp_path),
+            scholar_paper_index_path=str(tmp_path / "missing_paper_index.json"),
+            deepseek_api_key="",
+            gemini_api_key="",
+            mimo_api_key="",
+        )
+    )
+    request = ResearchRequest(
+        project_name="Report incremental persistence regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    status = await pipeline.prepare_run(request, owner="test")
+    evidence = [_evidence()]
+    claims = [_claim()]
+    metrics = RunMetrics(
+        sources_fetched=1,
+        evidence_count=1,
+        claim_count=1,
+        verified_claim_count=1,
+    )
+
+    fallbacks = await pipeline.write_report(
+        status.run_id,
+        request,
+        evidence,
+        claims,
+        metrics,
+        _matrix(),
+        [],
+        _observability(),
+    )
+
+    run_dir = pipeline.runs.run_dir(status.run_id)
+    assert fallbacks == []
+    assert "LLM report succeeded" in (run_dir / "reports" / "report.md").read_text(
+        encoding="utf-8"
+    )
+    assert "LLM summary succeeded" in (run_dir / "reports" / "executive_summary.md").read_text(
+        encoding="utf-8"
+    )
+    assert "LLM methodology succeeded" in (run_dir / "reports" / "methodology.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _evidence() -> Evidence:

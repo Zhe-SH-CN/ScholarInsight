@@ -1093,6 +1093,29 @@ class LocalPaperIndex:
                 "proactive care",
             )
         )
+        safety_bias_eval_drift = (
+            any(
+                marker in primary
+                for marker in (
+                    "bias evaluation",
+                    "bias measurement",
+                    "bias metric",
+                    "bias metrics",
+                    "fairness evaluation",
+                    "safety evaluation",
+                    "safety evaluator",
+                    "evaluation instability",
+                    "style sensitivity",
+                    "stylistic variation",
+                    "stylistic variations",
+                    "text style transformation",
+                    "text style transformations",
+                    "non-semantic",
+                    "non semantic",
+                )
+            )
+            and any(marker in primary for marker in ("bias", "fairness", "safety"))
+        )
         modality_application_drift = any(
             marker in primary
             for marker in (
@@ -1112,10 +1135,16 @@ class LocalPaperIndex:
                 "video generalization",
             )
         )
-        if modality_application_drift or (causal_application_drift and not explicit_llm_causal_eval):
+        if (
+            modality_application_drift
+            or (
+                (causal_application_drift or safety_bias_eval_drift)
+                and not explicit_llm_causal_eval
+            )
+        ):
             return SourceSubtype(
                 "causal_application_adjacent",
-                "paper applies causal framing to discovery, alignment, robustness, modality, or process-reward settings rather than evaluating LLM causal reasoning ability",
+                "paper applies causal framing to discovery, alignment, robustness, safety/bias evaluation, modality, or process-reward settings rather than evaluating LLM causal reasoning ability",
                 "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning",
             )
         generic_uncertainty_reasoning = any(
