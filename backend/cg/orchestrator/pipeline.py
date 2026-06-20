@@ -1852,7 +1852,7 @@ class ResearchPipeline:
                 recommendations,
                 observability,
             ),
-            build_executive_summary(request, metrics, observability, recommendations),
+            build_executive_summary(request, metrics, observability, recommendations, claims),
         )
         await write_text(run_dir / "reports" / "executive_summary.md", executive_summary)
 
@@ -3673,6 +3673,19 @@ def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, cl
     return findings[:5] or ["本次运行已形成基础证据库，但仍需要更多可交叉验证的高质量来源来支撑强结论。"]
 
 
+def report_ready_finding_lines(claims: list[Claim], limit: int = 3, max_len: int = 180) -> list[str]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (item.confidence, item.source_paper_count, len(item.supporting_evidence_ids)),
+        reverse=True,
+    )[:limit]
+    return [
+        f"- **{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}**："
+        f"{compact_fact(best_claim_text(claim), max_len)}"
+        for claim in ready_claims
+    ]
+
+
 def build_analysis_report(
     request: ResearchRequest,
     evidence: list[Evidence],
@@ -3739,10 +3752,21 @@ def build_analysis_report(
         )
         lines.extend([f"### {DIMENSION_LABELS.get(dimension, dimension)}", ""])
         lines.extend(build_dimension_overview(dimension, dimension_cells))
-        for claim in dimension_claims[:6]:
+        report_ready_claims = [claim for claim in dimension_claims if is_report_ready_claim(claim)]
+        audit_only_claims = [claim for claim in dimension_claims if not is_report_ready_claim(claim)]
+        if report_ready_claims:
+            lines.extend(["", "#### 可进入报告主体的综合结论", ""])
+        for claim in report_ready_claims[:4]:
             cite = citations_for_ids(claim.supporting_evidence_ids, citation_numbers)
             wording = compact_fact(best_claim_text(claim), 280)
             lines.append(f"- {wording}{cite}")
+        if audit_only_claims:
+            lines.extend(["", "#### 待验证观察与补证线索", ""])
+        for claim in audit_only_claims[:4]:
+            cite = citations_for_ids(claim.supporting_evidence_ids, citation_numbers)
+            reason = claim_report_ready_reason(claim)
+            wording = compact_fact(best_claim_text(claim), 240)
+            lines.append(f"- {wording}{cite}（暂不进入主结论：{reason or 'needs_review'}）")
         if not dimension_claims:
             lines.extend(build_dimension_fallback_points(dimension_cells, citation_numbers))
         if dimension_evidence:
@@ -4211,13 +4235,19 @@ def build_executive_summary(
     metrics: RunMetrics,
     observability: ObservabilitySnapshot,
     recommendations: list[OpportunityRecommendation],
+    claims: list[Claim] | None = None,
 ) -> str:
+    ready_findings = report_ready_finding_lines(claims or [], limit=3, max_len=170) if claims is not None else []
     lines = [
         f"# {request.project_name} · Executive Summary",
         "",
         f"研究方向：{request.target_topic}",
         f"本次运行获得 {metrics.sources_fetched} 篇可用内容，抽取 {metrics.evidence_count} 条 Evidence，生成 {metrics.claim_count} 条 Claim。",
         f"综合覆盖度：{observability.evidence_coverage_score:.0%}；报告可信度：{observability.report_confidence:.0%}。",
+        "",
+        "## Report-ready Findings",
+        "",
+        *(ready_findings or ["- 本轮尚未形成可进入报告主体的范围限定综合结论；应继续补证或降低结论强度。"]),
         "",
         "## Top Recommendations",
         "",
