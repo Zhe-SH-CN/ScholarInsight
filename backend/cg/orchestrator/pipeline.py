@@ -2317,6 +2317,25 @@ CLUSTER_HINTS: dict[str, tuple[str, ...]] = {
         "olympiad-level",
         "olympiad",
     ),
+    "scientific_discovery_workflow_protocol": (
+        "scientific discovery",
+        "discovery process",
+        "data-driven discovery",
+        "hypothesis generation",
+        "hypothesis",
+        "experimental design",
+        "experiment planning",
+        "research workflow",
+        "complete research workflow",
+        "scientific workflow",
+        "discovery pipeline",
+        "biological discovery pipeline",
+        "scientific partners",
+        "autonomous scientific",
+        "multi-agent architecture",
+        "agent plans",
+        "agentic",
+    ),
 }
 
 CLUSTER_LABELS: dict[str, str] = {
@@ -2335,14 +2354,20 @@ CLUSTER_LABELS: dict[str, str] = {
     "path_composition_graph_reasoning": "path composition and graph traversal",
     "math_proof_verification_protocol": "mathematical proof verification protocol",
     "math_benchmark_problem_protocol": "mathematical benchmark/problem protocol",
+    "scientific_discovery_workflow_protocol": "scientific discovery workflow protocol",
 }
 
 CLUSTER_DIMENSION_OVERRIDES: dict[str, str] = {
     "math_proof_verification_protocol": "formal_proof_symbolic_reasoning",
     "math_benchmark_problem_protocol": "math_benchmark_evaluation",
+    "scientific_discovery_workflow_protocol": "lab_workflow_reasoning",
 }
 
-MATH_CLUSTER_KEYS = set(CLUSTER_DIMENSION_OVERRIDES)
+MATH_CLUSTER_KEYS = {
+    "math_proof_verification_protocol",
+    "math_benchmark_problem_protocol",
+}
+SCIENTIFIC_CLUSTER_KEYS = {"scientific_discovery_workflow_protocol"}
 
 MATH_DIMENSIONS = {
     "math_benchmark_evaluation",
@@ -2351,6 +2376,15 @@ MATH_DIMENSIONS = {
     "self_consistency_search_verification",
     "natural_language_to_formal_math",
     "math_error_diagnosis",
+}
+
+SCIENTIFIC_DIMENSIONS = {
+    "scientific_problem_benchmarking",
+    "tool_augmented_scientific_reasoning",
+    "domain_grounding_verification",
+    "scientific_error_analysis",
+    "lab_workflow_reasoning",
+    "multimodal_scientific_reasoning",
 }
 
 CLUSTER_STOPWORDS = {
@@ -2437,11 +2471,11 @@ def build_evidence_clusters(evidence: list[Evidence], claims: list[Claim] | None
     labels: dict[tuple[str, str], str] = {}
     for ev in evidence:
         key, label = evidence_cluster_key(ev)
-        dimension = (
-            CLUSTER_DIMENSION_OVERRIDES.get(key, ev.dimension or "other")
-            if ev.dimension in MATH_DIMENSIONS
-            else ev.dimension or "other"
-        )
+        dimension = ev.dimension or "other"
+        if key in MATH_CLUSTER_KEYS and ev.dimension in MATH_DIMENSIONS:
+            dimension = CLUSTER_DIMENSION_OVERRIDES[key]
+        elif key in SCIENTIFIC_CLUSTER_KEYS and ev.dimension in SCIENTIFIC_DIMENSIONS:
+            dimension = CLUSTER_DIMENSION_OVERRIDES[key]
         grouped[(dimension, key)].append(ev)
         labels[(dimension, key)] = label
 
@@ -2658,6 +2692,7 @@ def cluster_axis_phrase(label: str) -> str:
         "path composition and graph traversal": "多跳路径组合、图遍历、关系链搜索或路径级推理控制",
         "mathematical proof verification protocol": "形式证明、证明检查、Lean/证明助手验证或证明正确性评估",
         "mathematical benchmark/problem protocol": "数学题集、GSM8K/MATH 类基准、奥赛题或 word-problem 评测协议",
+        "scientific discovery workflow protocol": "假设生成、实验设计、数据驱动发现、agent 协作或研究流程编排",
     }.get(label, label)
 
 
@@ -2740,6 +2775,29 @@ def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
             "math_proof_verification_protocol",
             "representation_formalization",
         ],
+        "scientific_problem_benchmarking": [
+            "evaluation_benchmark",
+            "scientific_discovery_workflow_protocol",
+        ],
+        "tool_augmented_scientific_reasoning": [
+            "scientific_discovery_workflow_protocol",
+            "search_inference_control",
+            "modular_system_pipeline",
+        ],
+        "lab_workflow_reasoning": [
+            "scientific_discovery_workflow_protocol",
+            "modular_system_pipeline",
+            "evaluation_benchmark",
+        ],
+        "domain_grounding_verification": [
+            "scientific_discovery_workflow_protocol",
+            "verification_reward",
+            "evaluation_benchmark",
+        ],
+        "multimodal_scientific_reasoning": [
+            "scientific_discovery_workflow_protocol",
+            "modular_system_pipeline",
+        ],
     }.get(ev.dimension, [])
     for key in preferred_keys:
         hints = CLUSTER_HINTS.get(key, ())
@@ -2747,6 +2805,8 @@ def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
             return key, CLUSTER_LABELS[key]
     for key, hints in CLUSTER_HINTS.items():
         if key in MATH_CLUSTER_KEYS and ev.dimension not in MATH_DIMENSIONS:
+            continue
+        if key in SCIENTIFIC_CLUSTER_KEYS and ev.dimension not in SCIENTIFIC_DIMENSIONS:
             continue
         if any(hint in text for hint in hints):
             return key, CLUSTER_LABELS[key]

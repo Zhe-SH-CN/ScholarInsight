@@ -622,6 +622,81 @@ def test_math_cluster_keys_do_not_override_non_math_dimensions() -> None:
     }
 
 
+def test_scientific_workflow_evidence_uses_topic_specific_cluster_key() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Discovery Agent A",
+            "lab_workflow_reasoning",
+            "The agent orchestrates a complete research workflow from hypothesis generation to experiment planning.",
+            source_subtype="scientific_discovery_agent",
+        ),
+        _evidence(
+            "ev_b1",
+            "Discovery Agent B",
+            "tool_augmented_scientific_reasoning",
+            "The multi-agent architecture coordinates data-driven discovery and scientific workflow actions.",
+            source_subtype="scientific_discovery_agent",
+        ),
+        _evidence(
+            "ev_c1",
+            "Discovery Agent C",
+            "domain_grounding_verification",
+            "The system acts as a scientific partner for biological discovery pipeline design.",
+            source_subtype="scientific_discovery_agent",
+        ),
+        _evidence(
+            "ev_d1",
+            "Discovery Agent D",
+            "scientific_problem_benchmarking",
+            "The discovery process evaluates hypothesis generation and experimental design tasks.",
+            source_subtype="scientific_discovery_agent",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+
+    assert len(clusters) == 1
+    assert clusters[0].dimension == "lab_workflow_reasoning"
+    assert clusters[0].label == "scientific discovery workflow protocol"
+    assert clusters[0].independent_paper_count == 4
+    assert len(report_ready) == 1
+    assert report_ready[0].supporting_source_subtype_paper_counts == {
+        "scientific_discovery_agent": 4
+    }
+
+
+def test_scientific_cluster_keys_do_not_override_non_scientific_dimensions() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Causal Paper A",
+            "llm_causal_benchmarking",
+            "The paper mentions hypothesis generation only as a contrastive example.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Causal Paper B",
+            "llm_causal_benchmarking",
+            "The system discusses agentic workflow as unrelated background.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+    ]
+
+    clusters = build_evidence_clusters(evidence)
+
+    assert {cluster.dimension for cluster in clusters} == {"llm_causal_benchmarking"}
+    assert "scientific discovery workflow protocol" not in {
+        cluster.label for cluster in clusters
+    }
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),
