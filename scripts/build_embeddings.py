@@ -5,6 +5,7 @@
 输出: data/embeddings.npy (N × 1024 float32)
 """
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -19,7 +20,13 @@ INDEX_PATH = DATA_DIR / "paper_index.json"
 EMBEDDINGS_PATH = DATA_DIR / "embeddings.npy"
 
 
+def use_direct_huggingface_endpoint() -> None:
+    os.environ["HF_ENDPOINT"] = "https://huggingface.co"
+
+
 def main():
+    use_direct_huggingface_endpoint()
+
     if not INDEX_PATH.exists():
         print(f"ERROR: {INDEX_PATH} not found. Run build_paper_index.py first.")
         sys.exit(1)

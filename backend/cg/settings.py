@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     # --- ScholarInsight ---
     scholar_paper_index_path: str = "data/paper_index.json"
     scholar_local_papers_dir: str = "/home/zsz/papers/"
+    scholar_enable_reranker: bool = True
+    scholar_reranker_model: str = "BAAI/bge-reranker-base"
+    scholar_reranker_device: str = "auto"
+    scholar_reranker_max_length: int = Field(default=512, ge=128, le=2048)
+    scholar_reranker_batch_size: int = Field(default=16, ge=1, le=128)
+    scholar_reranker_pool_size: int = Field(default=80, ge=8, le=500)
+    scholar_source_gate_enabled: bool = True
+    scholar_min_source_relevance: float = Field(default=0.12, ge=0, le=1)
 
     # --- 搜索 ---
     serper_api_key: str = ""

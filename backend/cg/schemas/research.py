@@ -124,6 +124,12 @@ class SourceCandidate(BaseModel):
     source_type: str = "other"
     query: str = ""
     score: float = Field(default=0.5, ge=0, le=1)
+    embedding_score: float | None = None
+    lexical_score: float | None = None
+    reranker_score: float | None = None
+    relevance_score: float = Field(default=0.5, ge=0, le=1)
+    relevance_label: str = "unscored"
+    rejection_reason: str = ""
     source_provider: str = ""
     published_at: datetime | None = None
     date_source: str = "unknown"  # exa / tavily / zhihu_edit_time / unknown
@@ -185,6 +191,13 @@ class SourceDocument(BaseModel):
     provider: str = ""
     query: str = ""
     content_source: str = ""
+    source_score: float = Field(default=0.5, ge=0, le=1)
+    relevance_score: float = Field(default=0.5, ge=0, le=1)
+    relevance_label: str = "unscored"
+    rejection_reason: str = ""
+    embedding_score: float | None = None
+    lexical_score: float | None = None
+    reranker_score: float | None = None
     ok: bool = True
     error: str | None = None
     published_at: datetime | None = None
@@ -262,6 +275,10 @@ class Claim(BaseModel):
     confidence: float = Field(default=0.5, ge=0, le=1)
     risk_level: Literal["low", "medium", "high"] = "medium"
     reasoning_summary: str
+    claim_type: str = "descriptive"
+    source_paper_count: int = 0
+    evidence_support_level: str = "unknown"
+    backlog_reason: str = ""
     verification_status: Literal[
         "draft",
         "verified",
@@ -289,6 +306,7 @@ class TraceEvent(BaseModel):
 
 class RunMetrics(BaseModel):
     source_candidates: int = 0
+    sources_rejected: int = 0
     sources_fetched: int = 0
     sources_failed: int = 0
     evidence_count: int = 0

@@ -69,6 +69,12 @@ def atomic_write_json_sync(path: Path, data: Any) -> None:
     tmp.replace(path)
 
 
+def count_jsonl_lines(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
 DIMENSION_KEYWORDS: dict[str, list[str]] = {
     "gap_driven_reframing": [
         "gap",
@@ -294,6 +300,8 @@ class ResearchPipeline:
         try:
             status.status = "running"
             status.current_stage = "Planning"
+            status.finished_at = None
+            status.error = None
             await self.runs.save_status(status)
 
             ctx = self.agent_context(run_id)
@@ -348,6 +356,9 @@ class ResearchPipeline:
                         feedback_message=feedback.message if feedback else "",
                     )
                     metrics.source_candidates = len(all_candidates)
+                    metrics.sources_rejected = count_jsonl_lines(
+                        self.runs.run_dir(run_id) / "sources" / "rejected_sources.jsonl"
+                    )
                     # 保存全部新候选（不截断，让 UI 能展示所有来源）
                     await self.save_candidates(run_id, new_candidates)
                     if dropped_for_limit or len(all_candidates) >= request.max_sources:
@@ -396,6 +407,21 @@ class ResearchPipeline:
                     status.metrics = metrics
                     await self.runs.save_status(status)
                     self._save_checkpoint(run_id, {"step": "evidence", "loop_round": loop_round, "max_loops": max_loops})
+
+                if loop_round > 1 and not new_documents:
+                    await self.trace(
+                        run_id,
+                        "Pipeline",
+                        "progress",
+                        "no_new_sources_to_analyze",
+                        f"第 {loop_round} 轮没有新增来源，跳过重复 Evidence/Claim 分析并进入综合报告",
+                        {"loop_round": loop_round, "existing_sources": len(all_candidates)},
+                    )
+                    self._save_checkpoint(
+                        run_id,
+                        {"step": "synthesis", "loop_round": loop_round - 1, "max_loops": max_loops},
+                    )
+                    break
 
                 # ── Evidence Structuring ──
                 async with self.node(run_id, status, "EvidenceStructuringAgent",
@@ -545,6 +571,7 @@ class ResearchPipeline:
             status.status = "completed"
             status.current_stage = "Completed"
             status.finished_at = datetime.now(timezone.utc)
+            status.error = None
             status.metrics = metrics
             await self.runs.save_status(status)
             self._clear_checkpoint(run_id)
@@ -584,6 +611,8 @@ class ResearchPipeline:
 
         try:
             status.status = "running"
+            status.finished_at = None
+            status.error = None
             await self.runs.save_status(status)
 
             ctx = self.agent_context(run_id)
@@ -638,7 +667,31 @@ class ResearchPipeline:
             )
 
             reviewed_claims: list[Claim] = []
+            claims_by_id: dict[str, Claim] = {}
+            claims_index = run_dir / "claims" / "_index.jsonl"
+            if claims_index.exists():
+                for line in claims_index.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        try:
+                            claim = Claim(**json.loads(line))
+                            claims_by_id[claim.claim_id] = claim
+                        except Exception:
+                            pass
+            if not claims_by_id:
+                for path in sorted((run_dir / "claims").glob("claim_*.json")):
+                    try:
+                        claim = Claim(**json.loads(path.read_text(encoding="utf-8")))
+                        claims_by_id[claim.claim_id] = claim
+                    except Exception:
+                        pass
+            reviewed_claims = list(claims_by_id.values())
             feedback: ResearchFeedback | None = None
+            if step == "synthesis":
+                feedback = ResearchFeedback(
+                    needs_more_research=False,
+                    loop_round=loop_round,
+                    message="Resumed at synthesis checkpoint.",
+                )
 
             await self.trace(
                 run_id, "Pipeline", "progress", "resumed",
@@ -650,6 +703,7 @@ class ResearchPipeline:
             for lr in range(loop_round, max_loops + 1):
                 await self.check_stop(run_id)
                 loop_label = f"第 {lr} 轮"
+                new_documents: list[SourceDocument] = []
 
                 # ── Planning ──
                 if lr == loop_round and step not in ("planning",):
@@ -690,6 +744,9 @@ class ResearchPipeline:
                             feedback_message=feedback.message if feedback else "",
                         )
                         metrics.source_candidates = len(all_candidates)
+                        metrics.sources_rejected = count_jsonl_lines(
+                            self.runs.run_dir(run_id) / "sources" / "rejected_sources.jsonl"
+                        )
                         await self.save_candidates(run_id, new_candidates)
                         new_documents = await self.materialize_search_documents(run_id, new_candidates)
                         fallback_candidates = [
@@ -709,6 +766,17 @@ class ResearchPipeline:
                         status.metrics = metrics
                         await self.runs.save_status(status)
                         self._save_checkpoint(run_id, {"step": "evidence", "loop_round": lr, "max_loops": max_loops})
+
+                if lr > 1 and step not in ("analysis", "synthesis") and not new_documents:
+                    await self.trace(
+                        run_id,
+                        "Pipeline",
+                        "progress",
+                        "no_new_sources_to_analyze",
+                        f"第 {lr} 轮没有新增来源，跳过重复 Evidence/Claim 分析并进入综合报告",
+                        {"loop_round": lr, "existing_sources": len(all_candidates)},
+                    )
+                    break
 
                 # ── Evidence Structuring ──
                 if lr == loop_round and step in ("analysis", "synthesis"):
@@ -799,6 +867,7 @@ class ResearchPipeline:
             status.status = "completed"
             status.current_stage = "Completed"
             status.finished_at = datetime.now(timezone.utc)
+            status.error = None
             status.metrics = metrics
             await self.runs.save_status(status)
             self._clear_checkpoint(run_id)
@@ -916,6 +985,13 @@ class ResearchPipeline:
             provider=candidate.source_provider,
             query=candidate.query,
             content_source=candidate.content_source or "local_fetch",
+            source_score=candidate.score,
+            relevance_score=candidate.relevance_score,
+            relevance_label=candidate.relevance_label,
+            rejection_reason=candidate.rejection_reason,
+            embedding_score=candidate.embedding_score,
+            lexical_score=candidate.lexical_score,
+            reranker_score=candidate.reranker_score,
             ok=page.ok,
             error=page.error,
             published_at=candidate.published_at,
@@ -961,6 +1037,13 @@ class ResearchPipeline:
                 provider=candidate.source_provider,
                 query=candidate.query,
                 content_source=candidate.content_source or "provider_content",
+                source_score=candidate.score,
+                relevance_score=candidate.relevance_score,
+                relevance_label=candidate.relevance_label,
+                rejection_reason=candidate.rejection_reason,
+                embedding_score=candidate.embedding_score,
+                lexical_score=candidate.lexical_score,
+                reranker_score=candidate.reranker_score,
                 ok=True,
                 error=None,
                 published_at=candidate.published_at,
@@ -986,6 +1069,8 @@ class ResearchPipeline:
                             "url": doc.url,
                             "provider": doc.provider,
                             "content_source": doc.content_source,
+                            "relevance_score": doc.relevance_score,
+                            "relevance_label": doc.relevance_label,
                             "excerpt": doc.excerpt,
                         }
                         for doc in documents[:20]
@@ -1020,9 +1105,32 @@ class ResearchPipeline:
         agent = EvidenceStructuringAgent(self.agent_context(run_id))
         coverage_counts = evidence_coverage_counts(existing_evidence or [], entities, dimensions)
         skipped_documents = 0
+        rejected_documents = 0
         candidates_for_extraction: list[tuple[SourceDocument, list[Evidence]]] = []
         for document in documents:
             if not document.ok or len(document.content) < 80:
+                continue
+            if (
+                document.relevance_label == "reject"
+                or (
+                    self.settings.scholar_source_gate_enabled
+                    and document.relevance_score < self.settings.scholar_min_source_relevance
+                )
+            ):
+                rejected_documents += 1
+                await append_jsonl(
+                    self.runs.run_dir(run_id) / "sources" / "rejected_sources.jsonl",
+                    {
+                        "source_id": document.source_id,
+                        "url": document.url,
+                        "title": document.title,
+                        "query": document.query,
+                        "provider": document.provider,
+                        "relevance_score": document.relevance_score,
+                        "relevance_label": document.relevance_label,
+                        "rejection_reason": document.rejection_reason or "below evidence extraction relevance threshold",
+                    },
+                )
                 continue
             doc_pairs = infer_document_pairs(document, entities, dimensions)
             if doc_pairs and all(evidence_cell_sufficient(coverage_counts.get(pair, 0)) for pair in doc_pairs):
@@ -1154,42 +1262,14 @@ class ResearchPipeline:
                 f"跳过 {skipped_documents} 篇文档：对应推理模式×维度 Evidence 已较充分",
                 {"count": skipped_documents},
             )
-        return evidence_items
-
-        extracted_batches = await asyncio.gather(
-            *(extract_one(document, deterministic) for document, deterministic in candidates_for_extraction)
-        )
-        for document, extracted in extracted_batches:
-            for item in extracted:
-                if item.paper and item.dimension:
-                    key = (item.paper, item.dimension)
-                    if evidence_cell_sufficient(coverage_counts.get(key, 0)):
-                        continue
-                    coverage_counts[key] = coverage_counts.get(key, 0) + 1
-                await repo.save(item)
-                evidence_items.append(item)
+        if rejected_documents:
             await self.trace(
                 run_id,
                 "EvidenceStructuringAgent",
                 "progress",
-                "extracted",
-                f"从「{document.title}」抽取 {len(extracted)} 条 Evidence",
-                {
-                    "url": document.url,
-                    "title": document.title,
-                    "count": len(extracted),
-                    "provider": document.provider,
-                    "content_source": document.content_source,
-                },
-            )
-        if skipped_documents:
-            await self.trace(
-                run_id,
-                "EvidenceStructuringAgent",
-                "progress",
-                "skipped_sufficient",
-                f"跳过 {skipped_documents} 篇文档：对应推理模式×维度 Evidence 已较充分",
-                {"count": skipped_documents},
+                "skipped_low_relevance",
+                f"跳过 {rejected_documents} 篇低相关文档：未进入 Evidence 抽取",
+                {"count": rejected_documents},
             )
         return evidence_items
 
@@ -1223,7 +1303,7 @@ class ResearchPipeline:
 
             for paper, paper_items in list(by_paper.items())[:6]:
                 supporting = paper_items[:5]
-                if not supporting:
+                if len(supporting) < 2:
                     continue
                 fact_snippet = "；".join(ev.fact for ev in supporting[:2])
                 deterministic_claims.append(build_claim_from_support(
@@ -1251,7 +1331,9 @@ class ResearchPipeline:
             ),
         )
         reviewed = await AnalysisAndReviewAgent(gemini_ctx).review(claims, evidence)
+        reviewed = apply_claim_discipline(reviewed, evidence)
         run_dir = self.runs.run_dir(run_id)
+        await atomic_write_json(run_dir / "exports" / "claim_backlog.json", claim_backlog_rows(reviewed, evidence))
         for claim in reviewed:
             await atomic_write_json(run_dir / "claims" / f"{claim.claim_id}.json", claim)
             await append_jsonl(run_dir / "claims" / "_index.jsonl", claim)
@@ -1497,6 +1579,9 @@ def build_claim_from_support(
 ) -> Claim:
     source_types = sorted({ev.source_type for ev in supporting})
     source_count = len({ev.source_url for ev in supporting})
+    paper_count = len({paper_key(ev) for ev in supporting})
+    claim_type = "comparative" if paper_count >= 2 else "single_paper_observation"
+    support_level = evidence_support_level(len(supporting), paper_count)
     confidence = min(0.92, average([ev.confidence for ev in supporting]) * min(1.0, 0.65 + len(supporting) * 0.08))
     return Claim(
         claim_id=stable_id("claim", f"{run_id}:{dimension}:{claim_text}:{[ev.evidence_id for ev in supporting]}"),
@@ -1508,8 +1593,85 @@ def build_claim_from_support(
         confidence=round(confidence, 3),
         risk_level="low" if len(supporting) >= 3 and source_count >= 2 else "medium",
         reasoning_summary=f"{reasoning} 来源类型包括：{'、'.join(source_types) or '未知'}。",
+        claim_type=claim_type,
+        source_paper_count=paper_count,
+        evidence_support_level=support_level,
         verification_status="draft",
     )
+
+
+def paper_key(evidence: Evidence) -> str:
+    return (evidence.paper or evidence.source_title or evidence.source_url or evidence.url or "unknown").strip()
+
+
+def evidence_support_level(evidence_count: int, paper_count: int) -> str:
+    if paper_count >= 2 and evidence_count >= 2:
+        return "strong"
+    if paper_count == 1 and evidence_count >= 2:
+        return "single_paper"
+    if evidence_count == 1:
+        return "insufficient"
+    return "weak"
+
+
+def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> list[Claim]:
+    by_id = {ev.evidence_id: ev for ev in evidence}
+    for claim in claims:
+        supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
+        paper_count = len({paper_key(ev) for ev in supporting})
+        claim.source_paper_count = paper_count
+        claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
+        if paper_count >= 2:
+            claim.claim_type = "comparative"
+        elif len(supporting) >= 2:
+            claim.claim_type = "single_paper_observation"
+        else:
+            claim.claim_type = "backlog"
+
+        backlog_reason = ""
+        if len(supporting) < 2:
+            backlog_reason = "single_evidence_claim"
+        elif claim.claim_type == "comparative" and paper_count < 2:
+            backlog_reason = "comparative_claim_without_independent_papers"
+        elif claim.verification_status in {"needs_evidence", "challenged", "rejected"}:
+            backlog_reason = f"red_team_{claim.verification_status}"
+
+        if backlog_reason:
+            claim.backlog_reason = backlog_reason
+            if claim.verification_status == "verified":
+                claim.verification_status = "needs_evidence"
+            if claim.risk_level == "low":
+                claim.risk_level = "medium"
+        elif claim.claim_type == "single_paper_observation" and claim.verification_status == "verified":
+            claim.final_wording = claim.final_wording or f"作为单论文观察，{claim.claim}"
+    return claims
+
+
+def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[dict[str, Any]]:
+    by_id = {ev.evidence_id: ev for ev in evidence}
+    rows: list[dict[str, Any]] = []
+    for claim in claims:
+        if not claim.backlog_reason and claim.verification_status == "verified":
+            continue
+        supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
+        rows.append(
+            {
+                "claim_id": claim.claim_id,
+                "dimension": claim.dimension,
+                "dimension_label": claim.dimension_label,
+                "claim_type": claim.claim_type,
+                "verification_status": claim.verification_status,
+                "risk_level": claim.risk_level,
+                "backlog_reason": claim.backlog_reason or f"red_team_{claim.verification_status}",
+                "source_paper_count": claim.source_paper_count,
+                "supporting_evidence_count": len(claim.supporting_evidence_ids),
+                "supporting_papers": sorted({paper_key(ev) for ev in supporting}),
+                "claim": claim.final_wording or claim.claim,
+                "red_team_notes": [note.model_dump(mode="json") for note in claim.red_team_notes],
+                "supporting_evidence_ids": claim.supporting_evidence_ids,
+            }
+        )
+    return rows
 
 
 def build_recommendations(

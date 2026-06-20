@@ -3,21 +3,21 @@
 This file is maintained by `scripts/batch_daemon.py` during batch runs.
 
 - Topics: 132
-- Completed: 4
+- Completed: 6
 - Failed: 0
-- Last refresh: 2026-06-20 00:50:59 UTC
+- Last refresh: 2026-06-20 03:08:12 UTC
 
 | No. | Topic | Status | Run folder | Checkpoint | Claims | Verified | Needs evidence | Challenged | Rejected | Single source | Insufficient evidence | Wording risk | Over-inference | Other risks | Updated | Error |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | Knowledge Graphs Construction | Done | 001_Knowledge_Graphs_Construction |  | 80 | 4 | 89 | 76 | 3 | 84 | 66 | 52 | 18 | 64 | 2026-06-20 00:50:59 UTC |  |
-| 2 | Dynamic Knowledge Graphs | Done | 002_Dynamic_Knowledge_Graphs |  | 80 | 6 | 250 | 74 | 1 | 202 | 157 | 146 | 8 | 255 | 2026-06-20 00:50:59 UTC |  |
-| 3 | Knowledge-Grounded Generation | Done | 003_Knowledge_Grounded_Generation |  | 80 | 3 | 144 | 77 | 0 | 125 | 60 | 70 | 4 | 135 | 2026-06-20 00:50:59 UTC |  |
-| 4 | RAG with Knowledge Graphs | Done | 004_RAG_with_Knowledge_Graphs |  | 80 | 1 | 259 | 79 | 2 | 220 | 124 | 125 | 24 | 232 | 2026-06-20 00:50:59 UTC |  |
-| 5 | Scientific Reasoning with LLMs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 6 | Mathematical Reasoning | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 7 | Logical Reasoning with Language Models | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 8 | Commonsense Reasoning | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 9 | World Models for Language | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
+| 1 | Knowledge Graphs Construction | Done | 001_Knowledge_Graphs_Construction |  | 80 | 8 | 224 | 80 | 0 | 176 | 116 | 68 | 12 | 163 | 2026-06-20 03:08:12 UTC |  |
+| 2 | Dynamic Knowledge Graphs | Done | 002_Dynamic_Knowledge_Graphs |  | 80 | 6 | 250 | 74 | 1 | 202 | 157 | 146 | 8 | 255 | 2026-06-20 03:08:12 UTC |  |
+| 3 | Knowledge-Grounded Generation | Done | 003_Knowledge_Grounded_Generation |  | 80 | 3 | 144 | 77 | 0 | 125 | 60 | 70 | 4 | 135 | 2026-06-20 03:08:12 UTC |  |
+| 4 | RAG with Knowledge Graphs | Done | 004_RAG_with_Knowledge_Graphs |  | 80 | 1 | 259 | 79 | 2 | 220 | 124 | 125 | 24 | 232 | 2026-06-20 03:08:12 UTC |  |
+| 5 | Scientific Reasoning with LLMs | Done | 005_Scientific_Reasoning_with_LLMs |  | 80 | 1 | 102 | 79 | 1 | 108 | 62 | 52 | 7 | 53 | 2026-06-20 03:08:12 UTC |  |
+| 6 | Mathematical Reasoning | Done | 006_Mathematical_Reasoning |  | 80 | 2 | 149 | 78 | 0 | 149 | 91 | 75 | 10 | 134 | 2026-06-20 03:08:12 UTC |  |
+| 7 | Logical Reasoning with Language Models | Checkpoint:evidence | 007_Logical_Reasoning_with_Language_Models | L2/5 | 80 | 0 | 56 | 80 | 0 | 55 | 32 | 19 | 5 | 10 | 2026-06-20 03:08:12 UTC |  |
+| 8 | Commonsense Reasoning | Checkpoint:evidence | 008_Commonsense_Reasoning | L2/5 | 80 | 2 | 44 | 78 | 3 | 51 | 36 | 26 | 4 | 13 | 2026-06-20 03:08:12 UTC |  |
+| 9 | World Models for Language | Checkpoint:evidence | 009_World_Models_for_Language | L2/5 | 80 | 3 | 46 | 77 | 3 | 65 | 41 | 26 | 10 | 20 | 2026-06-20 03:08:12 UTC |  |
 | 10 | Causal Reasoning with LLMs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
 | 11 | Counterfactual Inference | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
 | 12 | Multi-hop Reasoning on Graphs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |

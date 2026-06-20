@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 import json
+import math
+import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -65,6 +68,19 @@ QUERY_STOPWORDS = {
 }
 
 
+def use_direct_huggingface_endpoint() -> None:
+    os.environ["HF_ENDPOINT"] = "https://huggingface.co"
+
+
+@dataclass(frozen=True)
+class RerankedScore:
+    combined_score: float
+    relevance_score: float
+    relevance_label: str
+    reranker_score: float | None
+    rejection_reason: str
+
+
 def normalize_term(term: str) -> str:
     """Normalize query/paper terms enough for lexical reranking."""
     term = term.lower().strip("-_")
@@ -116,12 +132,21 @@ def query_phrases(terms: list[str]) -> list[str]:
 class LocalPaperIndex:
     """基于 embedding 的本地论文索引。"""
 
-    def __init__(self, index_path: str, embeddings_path: str | None = None):
+    def __init__(
+        self,
+        index_path: str,
+        embeddings_path: str | None = None,
+        settings: Settings | None = None,
+    ):
+        use_direct_huggingface_endpoint()
+        self.settings = settings or Settings()
         self.papers: list[dict] = []
         self.searchable_papers: list[dict] = []
         self.embeddings: np.ndarray | None = None
         self._model = None
         self._model_error: str | None = None
+        self._reranker = None
+        self._reranker_error: str | None = None
         self._lexical_cache: list[dict[str, object]] | None = None
 
         if Path(index_path).exists():
@@ -146,6 +171,7 @@ class LocalPaperIndex:
     def _get_model(self):
         """延迟加载 sentence-transformers 模型。"""
         if self._model is None:
+            use_direct_huggingface_endpoint()
             from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer("BAAI/bge-large-en-v1.5")
         return self._model
@@ -159,6 +185,57 @@ class LocalPaperIndex:
             return np.asarray(encoded, dtype=np.float32)[0]
         except Exception as exc:
             self._model_error = f"{type(exc).__name__}: {exc}"
+            return None
+
+    def _get_reranker(self):
+        """Lazy-load a sequence-classification reranker via transformers.
+
+        sentence-transformers CrossEncoder currently tries AutoProcessor for
+        bge-reranker-base in this environment, so use transformers directly.
+        """
+        if self._reranker is None:
+            use_direct_huggingface_endpoint()
+
+            import torch
+            from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+            device_setting = self.settings.scholar_reranker_device.strip().lower()
+            if device_setting == "auto":
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+            else:
+                device = device_setting
+            tokenizer = AutoTokenizer.from_pretrained(self.settings.scholar_reranker_model)
+            model = AutoModelForSequenceClassification.from_pretrained(
+                self.settings.scholar_reranker_model
+            ).to(device)
+            model.eval()
+            self._reranker = (tokenizer, model, device, torch)
+        return self._reranker
+
+    def _rerank_scores(self, query: str, papers: list[dict]) -> list[float] | None:
+        if not self.settings.scholar_enable_reranker or self._reranker_error:
+            return None
+        try:
+            tokenizer, model, device, torch = self._get_reranker()
+            batch_size = max(1, self.settings.scholar_reranker_batch_size)
+            scores: list[float] = []
+            docs = [self._reranker_text(paper) for paper in papers]
+            with torch.no_grad():
+                for start in range(0, len(docs), batch_size):
+                    batch_docs = docs[start:start + batch_size]
+                    inputs = tokenizer(
+                        [query] * len(batch_docs),
+                        batch_docs,
+                        padding=True,
+                        truncation=True,
+                        max_length=self.settings.scholar_reranker_max_length,
+                        return_tensors="pt",
+                    ).to(device)
+                    logits = model(**inputs).logits.reshape(-1)
+                    scores.extend(float(value) for value in logits.detach().cpu())
+            return scores
+        except Exception as exc:
+            self._reranker_error = f"{type(exc).__name__}: {exc}"
             return None
 
     def search(self, query: str, max_results: int = 10) -> list[SourceCandidate]:
@@ -211,10 +288,253 @@ class LocalPaperIndex:
             if len(on_topic) >= min(max_results, 3):
                 ranked = on_topic
 
+        ranked = self._rerank_ranked(query, ranked, papers, max_results)
+
         results = []
-        for combined_score, _embedding_score, _lexical_score, idx in ranked[:max_results]:
-            results.append(self._candidate_from_paper(papers[idx], query, combined_score))
+        accepted_count = 0
+        rejected_count = 0
+        for combined_score, embedding_score, lexical_score, idx in ranked:
+            if isinstance(combined_score, RerankedScore):
+                relevance = {
+                    "score": combined_score.relevance_score,
+                    "label": combined_score.relevance_label,
+                    "reason": combined_score.rejection_reason,
+                    "reranker_score": combined_score.reranker_score,
+                }
+                combined_value = combined_score.combined_score
+            else:
+                relevance = self._relevance_for_scores(
+                    embedding_score=embedding_score,
+                    lexical_score=lexical_score,
+                    combined_score=combined_score,
+                    reranker_score=None,
+                )
+                combined_value = combined_score
+            if relevance["label"] == "reject":
+                if rejected_count >= max_results:
+                    continue
+                rejected_count += 1
+            else:
+                if accepted_count >= max_results:
+                    continue
+                accepted_count += 1
+            results.append(
+                self._candidate_from_paper(
+                    papers[idx],
+                    query,
+                    combined_value,
+                    embedding_score=embedding_score,
+                    lexical_score=lexical_score,
+                    reranker_score=relevance["reranker_score"],
+                    relevance_score=relevance["score"],
+                    relevance_label=relevance["label"],
+                    rejection_reason=relevance["reason"],
+                )
+            )
+            if accepted_count >= max_results and rejected_count >= max_results:
+                break
         return results
+
+    def _rerank_ranked(
+        self,
+        query: str,
+        ranked: list[tuple[float, float, float, int]],
+        papers: list[dict],
+        max_results: int,
+    ) -> list[tuple[object, float, float, int]]:
+        if not ranked:
+            return []
+        pool_size = min(
+            len(ranked),
+            max(max_results * 4, self.settings.scholar_reranker_pool_size),
+        )
+        pool = ranked[:pool_size]
+        reranker_scores = self._rerank_scores(query, [papers[idx] for *_scores, idx in pool])
+        rescored: list[tuple[object, float, float, int]] = []
+        for position, (combined_score, embedding_score, lexical_score, idx) in enumerate(pool):
+            reranker_score = reranker_scores[position] if reranker_scores is not None else None
+            relevance = self._relevance_for_scores(
+                embedding_score=embedding_score,
+                lexical_score=lexical_score,
+                combined_score=combined_score,
+                reranker_score=reranker_score,
+            )
+            topic_rejection = self._topic_rejection_reason(query, papers[idx])
+            if topic_rejection:
+                relevance = {
+                    "score": 0.0,
+                    "label": "reject" if self.settings.scholar_source_gate_enabled else "low",
+                    "reason": topic_rejection,
+                    "reranker_score": reranker_score,
+                }
+            rescored.append((
+                RerankedScore(
+                    combined_score=combined_score,
+                    relevance_score=relevance["score"],
+                    relevance_label=relevance["label"],
+                    reranker_score=reranker_score,
+                    rejection_reason=relevance["reason"],
+                ),
+                embedding_score,
+                lexical_score,
+                idx,
+            ))
+        rescored.sort(
+            key=lambda item: (
+                item[0].relevance_score if isinstance(item[0], RerankedScore) else float(item[0]),
+                item[0].combined_score if isinstance(item[0], RerankedScore) else float(item[0]),
+            ),
+            reverse=True,
+        )
+        accepted = [
+            item
+            for item in rescored
+            if isinstance(item[0], RerankedScore) and item[0].relevance_label != "reject"
+        ]
+        rejected = [
+            item
+            for item in rescored
+            if isinstance(item[0], RerankedScore) and item[0].relevance_label == "reject"
+        ]
+        return accepted + rejected
+
+    def _relevance_for_scores(
+        self,
+        *,
+        embedding_score: float,
+        lexical_score: float,
+        combined_score: float,
+        reranker_score: float | None,
+    ) -> dict[str, object]:
+        embedding_norm = min(1.0, max(0.0, (embedding_score + 1.0) / 2.0))
+        if reranker_score is None:
+            score = min(1.0, max(0.0, lexical_score * 0.62 + embedding_norm * 0.38))
+        else:
+            reranker_norm = 1.0 / (1.0 + math.exp(-max(-20.0, min(20.0, reranker_score))))
+            score = min(
+                1.0,
+                max(0.0, reranker_norm * 0.58 + lexical_score * 0.27 + embedding_norm * 0.15),
+            )
+
+        min_relevance = self.settings.scholar_min_source_relevance
+        if score >= 0.62:
+            label = "high"
+        elif score >= 0.35:
+            label = "medium"
+        elif score >= min_relevance:
+            label = "low"
+        else:
+            label = "reject" if self.settings.scholar_source_gate_enabled else "low"
+
+        reason = ""
+        if label == "reject":
+            reason = (
+                "low combined source relevance"
+                f" (embedding={embedding_score:.3f}, lexical={lexical_score:.3f}"
+                + (f", reranker={reranker_score:.3f}" if reranker_score is not None else "")
+                + ")"
+            )
+        return {
+            "score": round(float(score), 4),
+            "label": label,
+            "reason": reason,
+            "reranker_score": reranker_score,
+        }
+
+    def _topic_rejection_reason(self, query: str, paper: dict) -> str:
+        title = str(paper.get("title") or "").strip()
+        title_lower = title.lower()
+        if len(re.findall(r"[a-zA-Z]", title)) < 4:
+            return "non-informative paper title metadata"
+        if title_lower.startswith((
+            "proceedings of the",
+            "findings of the association",
+            "published as a conference paper",
+        )):
+            return "conference proceedings page rather than a paper title"
+
+        terms = set(query_terms(query))
+        primary = self._primary_text(paper).lower()
+        primary_terms = {normalize_term(term) for term in re.findall(r"[a-z0-9]{2,}", primary)}
+        primary_has_kg = self._has_kg_signal(primary, primary_terms)
+        primary_has_exact_kg = self._has_exact_kg_signal(primary, primary_terms)
+        primary_has_rag = self._has_rag_signal(primary, primary_terms)
+        primary_has_dynamic = self._has_dynamic_signal(primary, primary_terms)
+        query_needs_kg = {"knowledge", "graph"}.issubset(terms) or "kg" in terms or "graph_rag" in terms
+        query_needs_rag = (
+            "rag" in terms
+            or "graph_rag" in terms
+            or {"retrieval", "augmented", "generation"}.issubset(terms)
+        )
+        dynamic_query_terms = {"dynamic", "temporal", "update", "continual", "evolving", "event", "stream"}
+        query_lower = query.lower()
+        query_needs_dynamic_kg = query_needs_kg and (
+            bool(terms & dynamic_query_terms)
+            or "time-evolving" in query_lower
+            or "time evolving" in query_lower
+        )
+
+        if query_needs_dynamic_kg:
+            dynamic_title_ok = any(
+                phrase in title_lower
+                for phrase in (
+                    "dynamic knowledge",
+                    "dynamic graph",
+                    "temporal knowledge",
+                    "temporal graph",
+                    "time-evolving",
+                    "time evolving",
+                    "evolving knowledge",
+                    "knowledge update",
+                    "episodic memory",
+                    "dpcl-diff",
+                    "tgb",
+                )
+            )
+            if not dynamic_title_ok:
+                return "dynamic KG query requires title-level dynamic/temporal graph signal"
+            primary_has_temporal_graph = any(
+                phrase in primary
+                for phrase in (
+                    "temporal graph",
+                    "dynamic graph",
+                    "temporal knowledge graph",
+                    "dynamic knowledge graph",
+                    "time-evolving graph",
+                    "time evolving graph",
+                )
+            ) or "tgb" in primary_terms
+            if not ((primary_has_exact_kg and primary_has_dynamic) or primary_has_temporal_graph):
+                return "dynamic KG query requires title/abstract temporal-graph or dynamic-KG signal"
+            off_topic_dynamic = (
+                "protein directed evolution",
+                "knowledge distillation",
+                "takeaway recommendation",
+                "mobius group",
+                "multi-modal",
+            )
+            if any(phrase in primary for phrase in off_topic_dynamic) and "knowledge graph" not in title_lower:
+                return "title/abstract indicates an off-topic dynamic or knowledge transfer paper"
+
+        if query_needs_kg and query_needs_rag:
+            rag_title_ok = (
+                "rag" in title_lower
+                or "retrieval-augmented" in title_lower
+                or "retrieval augmented" in title_lower
+            )
+            kg_title_ok = (
+                "graph" in title_lower
+                or "knowledge-graph" in title_lower
+                or "knowledge graph" in title_lower
+                or "graphrag" in title_lower
+            )
+            if not (rag_title_ok and kg_title_ok):
+                return "RAG+KG query requires title-level RAG and graph signal"
+            if not primary_has_kg:
+                return "RAG+KG query requires title/abstract knowledge graph signal"
+            if not primary_has_rag:
+                return "RAG+KG query requires title/abstract retrieval-augmented generation signal"
+        return ""
 
     def _pseudo_query_embedding(
         self,
@@ -257,7 +577,19 @@ class LocalPaperIndex:
                 results.append(self._candidate_from_paper(paper, query, score))
         return results
 
-    def _candidate_from_paper(self, paper: dict, query: str, score: float) -> SourceCandidate:
+    def _candidate_from_paper(
+        self,
+        paper: dict,
+        query: str,
+        score: float,
+        *,
+        embedding_score: float | None = None,
+        lexical_score: float | None = None,
+        reranker_score: float | None = None,
+        relevance_score: float | None = None,
+        relevance_label: str = "unscored",
+        rejection_reason: str = "",
+    ) -> SourceCandidate:
         return SourceCandidate(
             url=paper.get("pdf_path", ""),
             title=paper.get("title", ""),
@@ -266,8 +598,25 @@ class LocalPaperIndex:
             source_type="academic_paper",
             query=query,
             score=min(max(float(score), 0.0), 1.0),
+            embedding_score=embedding_score,
+            lexical_score=lexical_score,
+            reranker_score=reranker_score,
+            relevance_score=relevance_score if relevance_score is not None else min(max(float(score), 0.0), 1.0),
+            relevance_label=relevance_label,
+            rejection_reason=rejection_reason,
             source_provider="local_papers",
         )
+
+    def _reranker_text(self, paper: dict) -> str:
+        title = str(paper.get("title") or "")
+        abstract = str(paper.get("abstract") or "")
+        focused = str(paper.get("focused_text") or "")[:1800]
+        return "\n".join(part for part in (title, abstract, focused) if part.strip())
+
+    def _primary_text(self, paper: dict) -> str:
+        title = str(paper.get("title") or "")
+        abstract = str(paper.get("abstract") or "")
+        return "\n".join(part for part in (title, abstract) if part.strip())
 
     def _ensure_lexical_cache(self) -> list[dict[str, object]]:
         if self._lexical_cache is not None:
@@ -316,7 +665,9 @@ class LocalPaperIndex:
             or "graph_rag" in term_set
             or {"retrieval", "augmented", "generation"}.issubset(term_set)
         )
-        query_needs_dynamic = bool(term_set & {"dynamic", "update", "continual", "time", "event", "stream"})
+        query_needs_dynamic = bool(
+            term_set & {"dynamic", "temporal", "update", "continual", "evolving", "event", "stream"}
+        )
 
         if query_needs_kg and query_needs_rag and not (has_kg and has_rag):
             return 0.0
@@ -349,6 +700,18 @@ class LocalPaperIndex:
             or "knowledge-graph" in text
             or "graph retrieval augmented generation" in text
             or "graph retrieval-augmented generation" in text
+        )
+
+    def _has_exact_kg_signal(self, text: str, text_terms: object) -> bool:
+        terms = text_terms if isinstance(text_terms, set) else set()
+        return (
+            "kg" in terms
+            or "tkg" in terms
+            or "knowledge graph" in text
+            or "knowledge graphs" in text
+            or "knowledge-graph" in text
+            or "temporal knowledge graph" in text
+            or "dynamic knowledge graph" in text
         )
 
     def _has_rag_signal(self, text: str, text_terms: object) -> bool:
@@ -395,7 +758,7 @@ class LocalPaperSearchTool:
             else:
                 # fallback: data_dir 下的子路径
                 p = (settings.data_dir / index_path).resolve()
-        self.index = LocalPaperIndex(str(p))
+        self.index = LocalPaperIndex(str(p), settings=settings)
 
     @property
     def provider_names(self) -> list[str]:

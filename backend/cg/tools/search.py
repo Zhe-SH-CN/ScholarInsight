@@ -651,6 +651,18 @@ def merge_candidate(first: SourceCandidate, second: SourceCandidate) -> SourceCa
         source_type=primary.source_type if primary.source_type != "other" else secondary.source_type,
         query=primary.query or secondary.query,
         score=round(min(1.0, max(first.score, second.score) + 0.02), 3),
+        embedding_score=primary.embedding_score
+        if primary.embedding_score is not None
+        else secondary.embedding_score,
+        lexical_score=primary.lexical_score
+        if primary.lexical_score is not None
+        else secondary.lexical_score,
+        reranker_score=primary.reranker_score
+        if primary.reranker_score is not None
+        else secondary.reranker_score,
+        relevance_score=max(primary.relevance_score, secondary.relevance_score),
+        relevance_label=primary.relevance_label if primary.relevance_label != "unscored" else secondary.relevance_label,
+        rejection_reason=primary.rejection_reason or secondary.rejection_reason,
         source_provider=provider,
     )
 

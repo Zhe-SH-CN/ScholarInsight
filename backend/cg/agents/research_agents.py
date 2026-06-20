@@ -11,6 +11,7 @@ from typing import Any, Awaitable, Callable
 from urllib.parse import urlparse
 
 from cg.agents.runtime import BaseAgent
+from cg.repositories.base import append_jsonl
 from cg.schemas.research import (
     Claim,
     PaperPatternMatrix,
@@ -848,21 +849,35 @@ class SourceResearchAgent(BaseAgent):
             )
             return []
         results: list[SourceCandidate] = []
+        rejected_results: list[SourceCandidate] = []
         for provider, provider_results in provider_batches.items():
             for result in provider_results:
                 result.query = task.query
                 if result.source_type == "other" and task.expected_source_types:
                     result.source_type = task.expected_source_types[0]
-                result.score = score_candidate_for_task(result, task, search_round)
+                task_score = score_candidate_for_task(result, task, search_round)
+                if result.relevance_label == "unscored":
+                    result.score = task_score
+                    result.relevance_score = max(result.relevance_score, task_score)
+                else:
+                    result.score = round(
+                        min(1.0, max(result.score, result.relevance_score * 0.85 + task_score * 0.15)),
+                        4,
+                    )
+                if result.relevance_label == "reject":
+                    rejected_results.append(result)
+                    continue
                 results.append(result)
             await self.record_llm_event(
                 "progress", "tool_result",
-                f"{provider_display_name(provider)} 返回 {len(provider_results)} 条结果",
+                f"{provider_display_name(provider)} 返回 {len(provider_results)} 条结果，接受 {len([item for item in provider_results if item.relevance_label != 'reject'])} 条",
                 {
                     "tool": provider,
                     "task_id": task.task_id,
                     "query": task.query,
                     "count": len(provider_results),
+                    "accepted_count": len([item for item in provider_results if item.relevance_label != "reject"]),
+                    "rejected_count": len([item for item in provider_results if item.relevance_label == "reject"]),
                     "search_round": search_round,
                     "results": [
                         {
@@ -870,16 +885,54 @@ class SourceResearchAgent(BaseAgent):
                             "url": item.url,
                             "snippet": item.snippet,
                             "content_source": item.content_source,
+                            "relevance_score": item.relevance_score,
+                            "relevance_label": item.relevance_label,
+                            "rejection_reason": item.rejection_reason,
                         }
                         for item in provider_results
                     ],
                 },
             )
-        for result in results:
-            result.query = task.query
-            if result.source_type == "other" and task.expected_source_types:
-                result.source_type = task.expected_source_types[0]
-            result.score = score_candidate_for_task(result, task, search_round)
+        if rejected_results:
+            path = self.ctx.run_dir / "sources" / "rejected_sources.jsonl"
+            for item in rejected_results:
+                await append_jsonl(
+                    path,
+                    {
+                        "url": item.url,
+                        "title": item.title,
+                        "query": item.query,
+                        "task_id": task.task_id,
+                        "dimension": task.dimension,
+                        "source_provider": item.source_provider,
+                        "score": item.score,
+                        "embedding_score": item.embedding_score,
+                        "lexical_score": item.lexical_score,
+                        "reranker_score": item.reranker_score,
+                        "relevance_score": item.relevance_score,
+                        "relevance_label": item.relevance_label,
+                        "rejection_reason": item.rejection_reason,
+                    },
+                )
+            await self.record_llm_event(
+                "progress",
+                "sources_rejected",
+                f"过滤 {len(rejected_results)} 条低相关来源，未进入 Evidence 抽取",
+                {
+                    "task_id": task.task_id,
+                    "query": task.query,
+                    "rejected_count": len(rejected_results),
+                    "examples": [
+                        {
+                            "title": item.title,
+                            "url": item.url,
+                            "relevance_score": item.relevance_score,
+                            "reason": item.rejection_reason,
+                        }
+                        for item in rejected_results[:8]
+                    ],
+                },
+            )
         return results
 
     async def collect(
@@ -1128,21 +1181,26 @@ class AnalysisAndReviewAgent(BaseAgent):
             if len(supporting_papers) >= 2:
                 claim_type = "comparative"  # 多篇论文 → 对比型
             elif len(supporting) >= 2:
-                claim_type = "single_paper"  # 同一篇论文多条证据 → 单论文洞察型
+                claim_type = "single_paper_observation"  # 同一篇论文多条证据 → 单论文观察
             else:
-                claim_type = "descriptive"  # 仅1条证据 → 描述型
+                claim_type = "backlog"  # 仅1条证据 → 进入补证队列
 
             dimension = str(row.get("dimension") or "other")
             claim_text = str(row.get("claim") or "").strip()
             if len(claim_text) < 12:
                 continue
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
-            if claim_type == "descriptive":
+            if claim_type == "backlog":
                 confidence = min(confidence, 0.55)
                 if not re.match(r"^(根据|基于|现有|从|该证据)", claim_text):
                     claim_text = f"现有单篇论文证据显示，{claim_text}"
-            elif claim_type == "single_paper":
+            elif claim_type == "single_paper_observation":
                 confidence = min(confidence, 0.75)
+            support_level = (
+                "strong" if len(supporting_papers) >= 2 and len(supporting) >= 2
+                else "single_paper" if len(supporting) >= 2
+                else "insufficient"
+            )
             claim_id = make_stable_id("claim", f"{self.ctx.run_id}:{dimension}:{claim_text}:{supporting}")
             claims.append(
                 Claim(
@@ -1155,6 +1213,10 @@ class AnalysisAndReviewAgent(BaseAgent):
                     confidence=confidence,
                     risk_level="medium",
                     reasoning_summary=str(row.get("reasoning_summary") or "由 LLM 基于 Evidence 聚合生成。"),
+                    claim_type=claim_type,
+                    source_paper_count=len(supporting_papers),
+                    evidence_support_level=support_level,
+                    backlog_reason="single_evidence_claim" if claim_type == "backlog" else "",
                     verification_status="draft",
                     generated_by_agent=self.name,
                     generated_by_skill=self.skill_id,
@@ -1582,7 +1644,7 @@ class ReportComposerAgent(BaseAgent):
                 "1. 若 briefing notes 中 quality_context.report_mode 为 exploratory_pilot，标题或摘要第一句必须明确标注"
                 "这是探索性 pilot / 低置信报告；不得把待验证观察写成正式结论\n"
                 "2. 摘要中的强结论只能来自 top_claims；若 top_claims 为空，必须写明本轮未形成足够稳健的主结论\n"
-                "3. tentative_claims 只能放在'待验证观察'、'研究空白与风险'或'下一轮补证'语境，不得放入执行摘要强结论\n"
+                "3. tentative_claims 是补证 backlog，只能放在'下一轮补证'或'置信度说明'语境，不得作为报告主体分析材料\n"
                 "4. 被 rejected 或 high risk 的 claim 不得作为结论或建议依据\n"
                 "5. 摘要要有真正的学术判断：哪些推理模式最突出、哪些论文机制最有启发、研究空白在哪里\n"
                 "6. 推理模式对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
@@ -1854,13 +1916,14 @@ class ReportComposerAgent(BaseAgent):
                 "claim_risk_counts": dict(claim_risk_counts),
                 "failed_gates": failed_gates,
                 "claim_use_policy": (
-                    "Use top_claims as main conclusions. Use tentative_claims only as hypotheses or observations "
-                    "that require more evidence. Never use do_not_use_as_conclusions as report conclusions."
+                    "Use top_claims as main conclusions. Treat tentative_claims as claim backlog for future evidence "
+                    "collection, not as report-body conclusions. Never use do_not_use_as_conclusions as report conclusions."
                 ),
             },
             "matrix_cells": matrix_cells,
             "top_claims": top_claims,
             "tentative_claims": tentative_claims[:18],
+            "claim_backlog": tentative_claims[:18],
             "do_not_use_as_conclusions": do_not_use_as_conclusions[:8],
             "representative_evidence": evidence_brief,
             "recommendations": [
@@ -1966,7 +2029,7 @@ class ReportComposerAgent(BaseAgent):
                 "不要编造额外事实，不要暴露 ev_ ID，不要写模板化空话。"
                 "输出中文 Markdown，结构为：# Summary、## Key Findings、## Recommended Moves、## Confidence Notes。"
                 "Key Findings 只能使用 verified_claims；如果 verified_claims 为空，必须明确写本轮没有足够稳健结论。"
-                "tentative_claims 只能写入 Confidence Notes 或待验证观察，不能写成发现。"
+                "tentative_claims 是 claim backlog，只能写入 Confidence Notes 或下一轮补证计划，不能写成发现。"
                 "若 quality_context.report_mode 是 exploratory_pilot，Summary 第一段必须标注这是探索性 pilot。"
                 "Recommended Moves 写 2-4 条可执行建议；Confidence Notes 简要说明哪些结论较稳、哪些仍需补证。"
             ),
@@ -2459,6 +2522,18 @@ def deterministic_red_team(claims: list[Claim], evidence: list[Evidence]) -> lis
     for claim in claims:
         supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
         source_domains = {urlparse(ev.source_url).netloc for ev in supporting}
+        source_papers = {ev.paper or ev.source_title or ev.source_url for ev in supporting}
+        claim.source_paper_count = len(source_papers)
+        if claim.source_paper_count >= 2:
+            claim.claim_type = "comparative"
+            claim.evidence_support_level = "strong" if len(supporting) >= 2 else "weak"
+        elif len(supporting) >= 2:
+            claim.claim_type = "single_paper_observation"
+            claim.evidence_support_level = "single_paper"
+        else:
+            claim.claim_type = "backlog"
+            claim.evidence_support_level = "insufficient"
+            claim.backlog_reason = claim.backlog_reason or "single_evidence_claim"
         notes: list[RedTeamNote] = []
         if len(supporting) < 2:
             notes.append(
@@ -2499,7 +2574,7 @@ def deterministic_red_team(claims: list[Claim], evidence: list[Evidence]) -> lis
     return claims
 
 
-def merge_claims(primary: list[Claim], fallback: list[Claim], limit: int = 80) -> list[Claim]:
+def merge_claims(primary: list[Claim], fallback: list[Claim], limit: int = 40) -> list[Claim]:
     merged: list[Claim] = []
     seen: set[str] = set()
     for claim in [*primary, *fallback]:
