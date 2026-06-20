@@ -143,6 +143,7 @@ class ResearchPlanningAgent(BaseAgent):
     ) -> ResearchPlan:
         """生成研究计划。第 2 轮起可接受 Analysis 的反馈，聚焦补充缺口。"""
         deterministic = deterministic_plan(request)
+        dimension_catalog = format_dimension_catalog(request.analysis_dimensions or DEFAULT_DIMENSIONS)
 
         # 构建反馈上下文
         feedback_context = ""
@@ -176,11 +177,8 @@ class ResearchPlanningAgent(BaseAgent):
                 "【查询设计规则】\n"
                 "1. 每个 source_task 提供英文查询，用于本地论文库 embedding 检索\n"
                 "2. 查询应聚焦于具体的技术方法、模型架构、训练策略\n"
-                "3. 覆盖 15 种推理模式：gap_driven_reframing, cross_domain_synthesis, representation_shift,\n"
-                "   modular_pipeline_composition, data_evaluation_engineering, principled_probabilistic_modeling,\n"
-                "   formal_experimental_tightening, approximation_engineering, inference_time_control,\n"
-                "   structural_inductive_bias, multiscale_hierarchical_modeling, mechanistic_decomposition,\n"
-                "   adversary_modeling, numerics_systems_codesign, data_centric_optimization\n"
+                "3. dimension 只能从本次请求的分析维度中选择，不要创造列表外的新 key\n"
+                f"\n【本次允许的分析维度】\n{dimension_catalog}\n"
                 "\n"
                 "【输出格式】纯 JSON，不加 Markdown 代码块：\n"
                 "{\n"
@@ -205,7 +203,7 @@ class ResearchPlanningAgent(BaseAgent):
                 '  "notes": "研究难点或注意事项"\n'
                 "}\n"
                 "\n"
-                "【数量要求】每个研究方向至少 5 个 source_task，总量 16-28 个，宁多勿少。\n"
+                "【数量要求】每个分析维度至少 1 条 source_task，总量 8-20 个；优先保证 query 精确相关。\n"
                 "intent 只能是：official / docs / review / comparison"
             ),
             user=(
@@ -2258,14 +2256,15 @@ def deterministic_plan(request: ResearchRequest) -> ResearchPlan:
     queries: list[str] = []
     source_tasks: list[SourceTask] = []
     for entity in entities:
-        add_source_task(
-            source_tasks,
-            entity,
-            "gap_driven_reframing",
-            "official",
-            f"{entity} limitations challenges bottlenecks survey",
-            ["academic_paper"],
-        )
+        if "gap_driven_reframing" in dimensions:
+            add_source_task(
+                source_tasks,
+                entity,
+                "gap_driven_reframing",
+                "official",
+                f"{entity} limitations challenges bottlenecks survey",
+                ["academic_paper"],
+            )
         for dimension in dimensions:
             if dimension == "gap_driven_reframing":
                 continue
@@ -2408,6 +2407,43 @@ def make_gap_source_task(entity: str, dimension: str, index: int) -> SourceTask:
         "adversary_modeling": f"{entity} adversarial robustness attack defense red teaming",
         "numerics_systems_codesign": f"{entity} systems codesign quantization kernel latency throughput",
         "data_centric_optimization": f"{entity} data-centric optimization data selection curation augmentation",
+        "kg_rag_architecture": f"{entity} GraphRAG knowledge graph retrieval augmented generation architecture framework",
+        "graph_retrieval_grounding": f"{entity} graph retrieval grounding entity linking subgraph retrieval evidence",
+        "kg_rag_evaluation": f"{entity} benchmark evaluation knowledge graph RAG retrieval grounded generation",
+        "multi_hop_kg_reasoning": f"{entity} multi-hop knowledge graph reasoning retrieval augmented generation",
+        "kg_construction_for_rag": f"{entity} knowledge graph construction extraction for retrieval augmented generation",
+        "rag_kg_boundary_analysis": f"{entity} GraphRAG KGQA KG construction boundary analysis retrieval augmented generation",
+        "application_boundary_cases": f"{entity} application case study domain-specific KG-RAG limitations",
+        "scientific_problem_benchmarking": f"{entity} scientific reasoning benchmark dataset problem solving evaluation",
+        "tool_augmented_scientific_reasoning": f"{entity} scientific reasoning tool augmented solver code execution simulation",
+        "domain_grounding_verification": f"{entity} domain grounding verification factual scientific evidence",
+        "multimodal_scientific_reasoning": f"{entity} multimodal scientific reasoning diagrams tables equations",
+        "scientific_error_analysis": f"{entity} scientific reasoning error analysis hallucination robustness",
+        "lab_workflow_reasoning": f"{entity} scientific discovery lab workflow hypothesis experiment planning",
+        "math_benchmark_evaluation": f"{entity} mathematical reasoning benchmark dataset evaluation GSM8K MATH",
+        "formal_proof_symbolic_reasoning": f"{entity} formal proof symbolic reasoning theorem proving",
+        "program_tool_augmented_solving": f"{entity} program aided mathematical reasoning tool augmented solving code execution",
+        "self_consistency_search_verification": f"{entity} self-consistency tree search verifier mathematical reasoning",
+        "natural_language_to_formal_math": f"{entity} natural language to formal math equations symbolic representation",
+        "math_error_diagnosis": f"{entity} mathematical reasoning error analysis process supervision verification",
+        "llm_causal_benchmarking": f"{entity} benchmark large language models causal reasoning statistical pitfalls",
+        "causal_intervention_counterfactual": f"{entity} intervention counterfactual causal reasoning large language models",
+        "causal_explanation_mechanism": f"{entity} causal explanation mechanism analysis large language models",
+        "causal_pitfall_robustness": f"{entity} causal reasoning robustness confounding spurious correlation benchmark",
+        "causal_tool_symbolic_integration": f"{entity} causal graph symbolic tool augmented large language model reasoning",
+        "causal_reasoning_evaluation_protocol": f"{entity} causal reasoning evaluation protocol datasets metrics LLM",
+        "treatment_effect_estimation": f"{entity} treatment effect estimation counterfactual machine learning",
+        "core_counterfactual_inference": f"{entity} counterfactual inference potential outcomes structural causal model",
+        "counterfactual_explanation_fairness": f"{entity} counterfactual explanation fairness recourse causal inference",
+        "temporal_counterfactual_estimation": f"{entity} temporal counterfactual estimation longitudinal treatment effect",
+        "identifiability_assumption_sensitivity": f"{entity} counterfactual identifiability assumptions sensitivity analysis",
+        "counterfactual_benchmarking": f"{entity} counterfactual inference benchmark dataset evaluation",
+        "graph_reasoning_benchmark": f"{entity} graph reasoning benchmark multi-hop question answering knowledge graph",
+        "kgqa_or_graph_reasoning": f"{entity} knowledge graph question answering multi-hop graph reasoning",
+        "core_multi_hop_graph_reasoning": f"{entity} multi-hop graph reasoning path reasoning knowledge graphs",
+        "semantic_parsing_grounding": f"{entity} semantic parsing grounding knowledge graph question answering",
+        "path_composition_reasoning": f"{entity} path composition relation chain reasoning knowledge graph",
+        "graph_retrieval_boundary": f"{entity} graph retrieval RAG adjacent multi-hop reasoning boundary",
     }
     return SourceTask(
         task_id=f"gap_coverage_{index:02d}",
@@ -2526,6 +2562,43 @@ def dimension_search_keywords(dimension: str) -> list[str]:
         "adversary_modeling": ["adversarial", "robust", "attack", "defense", "red-team"],
         "numerics_systems_codesign": ["system", "hardware", "kernel", "quantization", "latency"],
         "data_centric_optimization": ["data-centric", "data selection", "curation", "augmentation", "quality"],
+        "kg_rag_architecture": ["graphrag", "kg-rag", "knowledge graph rag", "architecture", "framework"],
+        "graph_retrieval_grounding": ["subgraph retrieval", "entity linking", "grounding", "retrieval"],
+        "kg_rag_evaluation": ["benchmark", "evaluation", "metric", "grounded generation", "retrieval quality"],
+        "multi_hop_kg_reasoning": ["multi-hop", "multi hop", "knowledge graph reasoning", "kg reasoning"],
+        "kg_construction_for_rag": ["knowledge graph construction", "kg construction", "extraction", "ontology"],
+        "rag_kg_boundary_analysis": ["boundary", "adjacent", "kgqa", "kg construction", "graphrag"],
+        "application_boundary_cases": ["application", "case study", "domain-specific", "medical", "recommendation"],
+        "scientific_problem_benchmarking": ["scientific benchmark", "problem solving", "scibench", "scienceqa"],
+        "tool_augmented_scientific_reasoning": ["tool", "code execution", "simulation", "solver"],
+        "domain_grounding_verification": ["grounding", "verification", "factual", "evidence"],
+        "multimodal_scientific_reasoning": ["multimodal", "diagram", "table", "equation"],
+        "scientific_error_analysis": ["error analysis", "hallucination", "robustness", "pitfall"],
+        "lab_workflow_reasoning": ["scientific discovery", "hypothesis", "experiment", "workflow"],
+        "math_benchmark_evaluation": ["gsm8k", "math", "benchmark", "evaluation"],
+        "formal_proof_symbolic_reasoning": ["formal proof", "symbolic", "theorem", "proof"],
+        "program_tool_augmented_solving": ["program", "code execution", "tool", "python"],
+        "self_consistency_search_verification": ["self-consistency", "tree search", "verifier", "verification"],
+        "natural_language_to_formal_math": ["formal math", "equation", "symbolic", "latex"],
+        "math_error_diagnosis": ["error", "process supervision", "reasoning trace", "diagnosis"],
+        "llm_causal_benchmarking": ["causal benchmark", "statistical pitfall", "causal reasoning", "llm"],
+        "causal_intervention_counterfactual": ["intervention", "counterfactual", "do-calculus", "causal"],
+        "causal_explanation_mechanism": ["causal explanation", "mechanism", "causal graph"],
+        "causal_pitfall_robustness": ["confounding", "spurious", "pitfall", "robustness"],
+        "causal_tool_symbolic_integration": ["causal graph", "symbolic", "tool", "structural causal"],
+        "causal_reasoning_evaluation_protocol": ["evaluation protocol", "dataset", "metric", "causal"],
+        "treatment_effect_estimation": ["treatment effect", "cate", "heterogeneous causal effect"],
+        "core_counterfactual_inference": ["counterfactual inference", "potential outcome", "structural causal"],
+        "counterfactual_explanation_fairness": ["counterfactual explanation", "fairness", "recourse"],
+        "temporal_counterfactual_estimation": ["temporal", "longitudinal", "over time", "counterfactual"],
+        "identifiability_assumption_sensitivity": ["identifiability", "assumption", "sensitivity"],
+        "counterfactual_benchmarking": ["counterfactual benchmark", "dataset", "evaluation"],
+        "graph_reasoning_benchmark": ["graph reasoning benchmark", "multi-hop benchmark", "question answering"],
+        "kgqa_or_graph_reasoning": ["kgqa", "knowledge graph question answering", "graph reasoning"],
+        "core_multi_hop_graph_reasoning": ["multi-hop graph", "path reasoning", "relation chain"],
+        "semantic_parsing_grounding": ["semantic parsing", "logical form", "grounding"],
+        "path_composition_reasoning": ["path composition", "relation composition", "reasoning path"],
+        "graph_retrieval_boundary": ["graph retrieval", "rag", "retrieval boundary"],
     }.get(dimension, [dimension])
 
 
@@ -2725,6 +2798,13 @@ def coerce_str_list(value: Any) -> list[str]:
     return []
 
 
+def format_dimension_catalog(dimensions: list[str]) -> str:
+    lines = []
+    for dimension in dimensions:
+        lines.append(f"- {dimension}: {DIMENSION_LABELS.get(dimension, dimension)}")
+    return "\n".join(lines)
+
+
 def normalize_dimensions(values: list[str]) -> list[str]:
     reverse = {label: key for key, label in DIMENSION_LABELS.items()}
     normalized: list[str] = []
@@ -2760,6 +2840,43 @@ DIMENSION_HINTS: dict[str, tuple[str, ...]] = {
     "adversary_modeling": ("adversarial", "robustness", "red team", "对抗"),
     "numerics_systems_codesign": ("numeric", "numerical", "systems codesign", "数值", "系统协同"),
     "data_centric_optimization": ("data-centric", "data centric", "instruction tuning", "synthetic data", "数据中心"),
+    "kg_rag_architecture": ("graphrag", "kg-rag", "knowledge graph rag", "architecture", "framework"),
+    "graph_retrieval_grounding": ("subgraph retrieval", "entity linking", "grounding", "retrieval grounding"),
+    "kg_rag_evaluation": ("kg-rag benchmark", "graph rag benchmark", "grounded generation evaluation"),
+    "multi_hop_kg_reasoning": ("multi-hop", "multi hop", "knowledge graph reasoning", "kg reasoning"),
+    "kg_construction_for_rag": ("kg construction", "knowledge graph construction", "extraction for rag"),
+    "rag_kg_boundary_analysis": ("boundary analysis", "kgqa", "kg construction", "graphrag adjacent"),
+    "application_boundary_cases": ("application", "case study", "domain-specific", "boundary case"),
+    "scientific_problem_benchmarking": ("scibench", "scienceqa", "scientific benchmark", "problem solving"),
+    "tool_augmented_scientific_reasoning": ("tool augmented", "code execution", "simulation", "solver"),
+    "domain_grounding_verification": ("domain grounding", "verification", "factual scientific", "evidence"),
+    "multimodal_scientific_reasoning": ("diagram", "table", "equation", "multimodal scientific"),
+    "scientific_error_analysis": ("error analysis", "hallucination", "robustness", "misleading evidence"),
+    "lab_workflow_reasoning": ("scientific discovery", "hypothesis", "experiment planning", "lab workflow"),
+    "math_benchmark_evaluation": ("gsm8k", "math benchmark", "mathematical benchmark", "evaluation"),
+    "formal_proof_symbolic_reasoning": ("formal proof", "symbolic reasoning", "theorem proving"),
+    "program_tool_augmented_solving": ("program aided", "code execution", "tool augmented", "python"),
+    "self_consistency_search_verification": ("self-consistency", "tree search", "verifier", "verification"),
+    "natural_language_to_formal_math": ("formal math", "equations", "symbolic representation", "latex"),
+    "math_error_diagnosis": ("math error", "process supervision", "reasoning trace", "diagnosis"),
+    "llm_causal_benchmarking": ("causal benchmark", "statistical pitfalls", "causal reasoning benchmark"),
+    "causal_intervention_counterfactual": ("intervention", "counterfactual", "do-calculus", "causal query"),
+    "causal_explanation_mechanism": ("causal explanation", "mechanism", "causal graph explanation"),
+    "causal_pitfall_robustness": ("confounding", "spurious correlation", "pitfall", "robustness"),
+    "causal_tool_symbolic_integration": ("causal graph", "symbolic", "tool augmented", "structural causal"),
+    "causal_reasoning_evaluation_protocol": ("evaluation protocol", "causal dataset", "metrics"),
+    "treatment_effect_estimation": ("treatment effect", "cate", "heterogeneous causal effect"),
+    "core_counterfactual_inference": ("counterfactual inference", "potential outcome", "structural causal model"),
+    "counterfactual_explanation_fairness": ("counterfactual explanation", "fairness", "recourse"),
+    "temporal_counterfactual_estimation": ("temporal counterfactual", "longitudinal", "over time"),
+    "identifiability_assumption_sensitivity": ("identifiability", "assumption", "sensitivity analysis"),
+    "counterfactual_benchmarking": ("counterfactual benchmark", "counterfactual dataset", "evaluation"),
+    "graph_reasoning_benchmark": ("graph reasoning benchmark", "multi-hop benchmark", "graph question answering benchmark"),
+    "kgqa_or_graph_reasoning": ("kgqa", "knowledge graph question answering", "graph reasoning"),
+    "core_multi_hop_graph_reasoning": ("multi-hop graph", "path reasoning", "relation chain"),
+    "semantic_parsing_grounding": ("semantic parsing", "logical form", "grounding"),
+    "path_composition_reasoning": ("path composition", "relation composition", "reasoning path"),
+    "graph_retrieval_boundary": ("graph retrieval", "rag adjacent", "retrieval boundary"),
 }
 
 
@@ -2779,9 +2896,16 @@ def normalize_dimension_key(value: Any, context: str = "") -> str:
         if key.lower() in combined or (label and label in raw_context):
             return key
 
+    best_hint_match: tuple[int, str] | None = None
     for key, hints in DIMENSION_HINTS.items():
-        if any(hint.lower() in combined for hint in hints):
-            return key
+        for hint in hints:
+            lowered_hint = hint.lower()
+            if lowered_hint in combined:
+                score = len(lowered_hint)
+                if best_hint_match is None or score > best_hint_match[0]:
+                    best_hint_match = (score, key)
+    if best_hint_match:
+        return best_hint_match[1]
     return "other"
 
 

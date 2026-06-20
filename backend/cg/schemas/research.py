@@ -26,6 +26,57 @@ DEFAULT_DIMENSIONS = [
     "data_centric_optimization",
 ]
 
+TOPIC_FAMILY_DIMENSIONS: dict[str, list[str]] = {
+    "rag_with_knowledge_graphs": [
+        "kg_rag_architecture",
+        "graph_retrieval_grounding",
+        "kg_rag_evaluation",
+        "multi_hop_kg_reasoning",
+        "kg_construction_for_rag",
+        "rag_kg_boundary_analysis",
+    ],
+    "scientific_reasoning_llms": [
+        "scientific_problem_benchmarking",
+        "tool_augmented_scientific_reasoning",
+        "domain_grounding_verification",
+        "multimodal_scientific_reasoning",
+        "scientific_error_analysis",
+        "lab_workflow_reasoning",
+    ],
+    "mathematical_reasoning": [
+        "math_benchmark_evaluation",
+        "formal_proof_symbolic_reasoning",
+        "program_tool_augmented_solving",
+        "self_consistency_search_verification",
+        "natural_language_to_formal_math",
+        "math_error_diagnosis",
+    ],
+    "causal_reasoning_llms": [
+        "llm_causal_benchmarking",
+        "causal_intervention_counterfactual",
+        "causal_explanation_mechanism",
+        "causal_pitfall_robustness",
+        "causal_tool_symbolic_integration",
+        "causal_reasoning_evaluation_protocol",
+    ],
+    "counterfactual_inference": [
+        "treatment_effect_estimation",
+        "core_counterfactual_inference",
+        "counterfactual_explanation_fairness",
+        "temporal_counterfactual_estimation",
+        "identifiability_assumption_sensitivity",
+        "counterfactual_benchmarking",
+    ],
+    "multi_hop_graph_reasoning": [
+        "graph_reasoning_benchmark",
+        "kgqa_or_graph_reasoning",
+        "core_multi_hop_graph_reasoning",
+        "semantic_parsing_grounding",
+        "path_composition_reasoning",
+        "graph_retrieval_boundary",
+    ],
+}
+
 DIMENSION_LABELS: dict[str, str] = {
     "gap_driven_reframing": "痛点驱动重构",
     "cross_domain_synthesis": "跨领域综合",
@@ -42,8 +93,68 @@ DIMENSION_LABELS: dict[str, str] = {
     "adversary_modeling": "对抗建模",
     "numerics_systems_codesign": "数值系统协同",
     "data_centric_optimization": "数据中心优化",
+    "kg_rag_architecture": "KG-RAG 架构机制",
+    "graph_retrieval_grounding": "图检索与 grounding",
+    "kg_rag_evaluation": "KG-RAG 评测协议",
+    "multi_hop_kg_reasoning": "多跳 KG 推理",
+    "kg_construction_for_rag": "RAG 用 KG 构建",
+    "rag_kg_boundary_analysis": "RAG/KG 边界分析",
+    "application_boundary_cases": "应用边界案例",
+    "scientific_problem_benchmarking": "科学问题基准",
+    "tool_augmented_scientific_reasoning": "工具增强科学推理",
+    "domain_grounding_verification": "领域 grounding 与验证",
+    "multimodal_scientific_reasoning": "多模态科学推理",
+    "scientific_error_analysis": "科学推理错误分析",
+    "lab_workflow_reasoning": "实验流程推理",
+    "math_benchmark_evaluation": "数学基准评测",
+    "formal_proof_symbolic_reasoning": "形式证明与符号推理",
+    "program_tool_augmented_solving": "程序/工具增强求解",
+    "self_consistency_search_verification": "搜索验证与自一致性",
+    "natural_language_to_formal_math": "自然语言到形式数学",
+    "math_error_diagnosis": "数学错误诊断",
+    "llm_causal_benchmarking": "LLM 因果基准",
+    "causal_intervention_counterfactual": "干预与反事实推理",
+    "causal_explanation_mechanism": "因果解释机制",
+    "causal_pitfall_robustness": "因果陷阱与鲁棒性",
+    "causal_tool_symbolic_integration": "因果工具/符号集成",
+    "causal_reasoning_evaluation_protocol": "因果评测协议",
+    "treatment_effect_estimation": "处理效应估计",
+    "core_counterfactual_inference": "核心反事实推断",
+    "counterfactual_explanation_fairness": "反事实解释与公平性",
+    "temporal_counterfactual_estimation": "时序反事实估计",
+    "identifiability_assumption_sensitivity": "可识别性与假设敏感性",
+    "counterfactual_benchmarking": "反事实基准评测",
+    "graph_reasoning_benchmark": "图推理基准",
+    "kgqa_or_graph_reasoning": "KGQA/图推理",
+    "core_multi_hop_graph_reasoning": "核心多跳图推理",
+    "semantic_parsing_grounding": "语义解析 grounding",
+    "path_composition_reasoning": "路径组合推理",
+    "graph_retrieval_boundary": "图检索边界",
     "other": "其他",
 }
+
+
+def topic_family_for_dimensions(target_topic: str) -> str:
+    """Return a coarse topic family used only to choose analysis dimensions."""
+    topic = target_topic.lower()
+    if "rag" in topic and ("knowledge graph" in topic or "kg" in topic):
+        return "rag_with_knowledge_graphs"
+    if "scientific reasoning" in topic:
+        return "scientific_reasoning_llms"
+    if "mathematical reasoning" in topic or topic.strip() == "math reasoning":
+        return "mathematical_reasoning"
+    if "causal reasoning" in topic and ("llm" in topic or "language model" in topic):
+        return "causal_reasoning_llms"
+    if "counterfactual inference" in topic:
+        return "counterfactual_inference"
+    if "multi-hop" in topic and "graph" in topic:
+        return "multi_hop_graph_reasoning"
+    return "generic"
+
+
+def dimensions_for_topic(target_topic: str) -> list[str]:
+    family = topic_family_for_dimensions(target_topic)
+    return TOPIC_FAMILY_DIMENSIONS.get(family, DEFAULT_DIMENSIONS).copy()
 
 
 class ResearchRequest(BaseModel):
@@ -76,6 +187,8 @@ class ResearchRequest(BaseModel):
                 data["topic_description"] = data["product_description"]
             if not data.get("seed_papers") and data.get("competitors"):
                 data["seed_papers"] = data["competitors"]
+            if not data.get("analysis_dimensions"):
+                data["analysis_dimensions"] = dimensions_for_topic(str(data.get("target_topic") or ""))
             return data
         return value
 

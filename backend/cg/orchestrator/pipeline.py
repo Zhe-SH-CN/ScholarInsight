@@ -3013,7 +3013,7 @@ def build_user_attention_analysis(
     claims: list[Claim],
     citation_numbers: dict[str, int],
 ) -> list[str]:
-    attention_order = DEFAULT_DIMENSIONS
+    attention_order = request.analysis_dimensions or matrix.dimensions or DEFAULT_DIMENSIONS
     lines: list[str] = []
     cells_by_dimension: dict[str, list[MatrixCell]] = defaultdict(list)
     for cell in matrix.cells:
