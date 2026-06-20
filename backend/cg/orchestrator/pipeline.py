@@ -31,6 +31,7 @@ from cg.repositories.evidence import EvidenceRepository
 from cg.repositories.run import RunRepository
 from cg.schemas.research import (
     Claim,
+    CounterexampleAuditRow,
     EvidenceCluster,
     PaperPatternMatrix,
     PaperProfile,
@@ -75,6 +76,23 @@ def count_jsonl_lines(path: Path) -> int:
     if not path.exists():
         return 0
     return sum(1 for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
+
+
+def load_rejected_source_candidates(run_dir: Path) -> list[SourceCandidate]:
+    path = run_dir / "sources" / "rejected_sources.jsonl"
+    if not path.exists():
+        return []
+    candidates: list[SourceCandidate] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+            row.setdefault("relevance_label", "reject")
+            candidates.append(SourceCandidate(**row))
+        except Exception:
+            continue
+    return candidates
 
 
 DIMENSION_KEYWORDS: dict[str, list[str]] = {
@@ -878,6 +896,16 @@ class ResearchPipeline:
                     unique_strings_fn=unique_strings,
                 )
                 artifacts["evidence_clusters"] = build_evidence_clusters(all_evidence, reviewed_claims)
+                counterexample_candidates = [
+                    *all_candidates,
+                    *load_rejected_source_candidates(self.runs.run_dir(run_id)),
+                ]
+                artifacts["counterexample_audit"] = build_counterexample_audit_rows(
+                    request,
+                    reviewed_claims,
+                    counterexample_candidates,
+                    selected_source_urls=[document.url for document in all_documents if document.ok],
+                )
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -893,6 +921,7 @@ class ResearchPipeline:
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"],
                     artifacts["observability"],
+                    artifacts.get("counterexample_audit", []),
                 )
                 if report_fallbacks:
                     status.warnings.append(
@@ -1182,6 +1211,16 @@ class ResearchPipeline:
                     unique_strings_fn=unique_strings,
                 )
                 artifacts["evidence_clusters"] = build_evidence_clusters(all_evidence, reviewed_claims)
+                counterexample_candidates = [
+                    *all_candidates,
+                    *load_rejected_source_candidates(run_dir),
+                ]
+                artifacts["counterexample_audit"] = build_counterexample_audit_rows(
+                    request,
+                    reviewed_claims,
+                    counterexample_candidates,
+                    selected_source_urls=[document.url for document in all_documents if document.ok],
+                )
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -1194,6 +1233,7 @@ class ResearchPipeline:
                 report_fallbacks = await self.write_report(
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"], artifacts["observability"],
+                    artifacts.get("counterexample_audit", []),
                 )
                 if report_fallbacks:
                     status.warnings.append(
@@ -1774,6 +1814,7 @@ class ResearchPipeline:
         evidence_graph = artifacts["evidence_graph"]
         observability = artifacts["observability"]
         evidence_clusters = artifacts.get("evidence_clusters", [])
+        counterexample_audit = artifacts.get("counterexample_audit", [])
         await atomic_write_json(run_dir / "exports" / "matrix.json", matrix)
         await write_text(run_dir / "exports" / "matrix.csv", build_matrix_csv(matrix))
         await atomic_write_json(run_dir / "exports" / "recommendations.json", recommendations)
@@ -1781,6 +1822,7 @@ class ResearchPipeline:
         await atomic_write_json(run_dir / "exports" / "observability.json", observability)
         await atomic_write_json(run_dir / "exports" / "evidence_graph.json", evidence_graph)
         await atomic_write_json(run_dir / "exports" / "evidence_clusters.json", evidence_clusters)
+        await atomic_write_json(run_dir / "exports" / "counterexample_audit.json", counterexample_audit)
 
     async def write_report(
         self,
@@ -1792,10 +1834,12 @@ class ResearchPipeline:
         matrix: PaperPatternMatrix,
         recommendations: list[OpportunityRecommendation],
         observability: ObservabilitySnapshot,
+        counterexample_audit: list[CounterexampleAuditRow] | None = None,
     ) -> list[dict[str, str]]:
         composer = ReportComposerAgent(self.agent_context(run_id))
         fallbacks: list[dict[str, str]] = []
         run_dir = self.runs.run_dir(run_id)
+        counterexample_audit = counterexample_audit or []
 
         async def run_section(
             section: str,
@@ -1834,9 +1878,19 @@ class ResearchPipeline:
                     "matrix": matrix,
                     "recommendations": recommendations,
                     "observability": observability,
+                    "counterexample_audit": counterexample_audit,
                 },
             ),
-            build_analysis_report(request, evidence, claims, metrics, matrix, recommendations, observability),
+            build_analysis_report(
+                request,
+                evidence,
+                claims,
+                metrics,
+                matrix,
+                recommendations,
+                observability,
+                counterexample_audit,
+            ),
         )
         await write_text(run_dir / "reports" / "report.md", report)
 
@@ -1882,6 +1936,7 @@ class ResearchPipeline:
                 "matrix": matrix,
                 "recommendations": recommendations,
                 "observability": observability,
+                "counterexample_audit": counterexample_audit,
                 "evidence_ids": [ev.evidence_id for ev in evidence],
             },
         )
@@ -4027,7 +4082,9 @@ def build_analysis_report(
     matrix: PaperPatternMatrix,
     recommendations: list[OpportunityRecommendation],
     observability: ObservabilitySnapshot,
+    counterexample_audit: list[CounterexampleAuditRow] | None = None,
 ) -> str:
+    counterexample_audit = counterexample_audit or []
     citation_numbers, reference_lines = build_citation_index(evidence)
     core_findings = build_core_findings(request, matrix, claims)
     target_strengths, target_weaknesses = build_target_advantage_analysis(request, matrix, claims, citation_numbers)
@@ -4067,6 +4124,10 @@ def build_analysis_report(
         "## 可投稿研究命题与实验化路径",
         "",
         *build_submission_framing(request, claims, citation_numbers),
+        "",
+        "## 反例与负结果审计",
+        "",
+        *build_counterexample_audit_section(counterexample_audit),
         "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
@@ -4664,6 +4725,207 @@ def submission_counterevidence_plan(claim: Claim) -> str:
         f"反例集至少覆盖去掉“{axis}”机制后表现不变、相邻任务不成立、噪声或分布外样本失效三类边界；"
         "机制消融若不能改变错误类型或指标，应作为负结果保留，而不是包装成贡献。"
     )
+
+
+def build_counterexample_audit_rows(
+    request: ResearchRequest,
+    claims: list[Claim],
+    candidates: list[SourceCandidate],
+    selected_source_urls: list[str] | set[str] | None = None,
+    limit: int = 8,
+) -> list[CounterexampleAuditRow]:
+    ready_claims = sorted_report_ready_claims(claims)
+    if not ready_claims or not candidates:
+        return []
+
+    selected_urls = {normalize_reference_url(url) for url in (selected_source_urls or [])}
+    scored_rows: list[tuple[float, CounterexampleAuditRow]] = []
+    seen_sources: set[str] = set()
+    for candidate in candidates:
+        normalized_url = normalize_reference_url(candidate.url)
+        audit_role = counterexample_audit_role(candidate, normalized_url in selected_urls)
+        if not audit_role or normalized_url in seen_sources:
+            continue
+        claim, match_score = best_counterexample_target_claim(candidate, ready_claims)
+        if not claim:
+            continue
+        axis = (
+            cluster_axis_phrase(claim.evidence_cluster_label)
+            if claim.evidence_cluster_label
+            else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+        )
+        audit_reason = counterexample_audit_only_reason(candidate, audit_role)
+        row = CounterexampleAuditRow(
+            audit_id=stable_id(
+                "cex",
+                f"{request.target_topic}:{claim.claim_id}:{candidate.url}:{candidate.source_subtype}:{audit_role}",
+            ),
+            target_claim_id=claim.claim_id,
+            target_dimension=claim.dimension,
+            target_dimension_label=DIMENSION_LABELS.get(claim.dimension, claim.dimension_label),
+            target_axis=axis,
+            source_title=candidate.title or candidate.url,
+            source_url=candidate.url,
+            source_subtype=candidate.source_subtype or "unclassified",
+            source_subtype_reason=candidate.source_subtype_reason,
+            relevance_score=round(min(1.0, max(0.0, candidate.relevance_score)), 4),
+            relevance_label=candidate.relevance_label,
+            rejection_reason=candidate.rejection_reason,
+            query=candidate.query,
+            audit_role=audit_role,
+            boundary_challenge=counterexample_boundary_challenge(request, claim, candidate, audit_role),
+            audit_only_reason=audit_reason,
+        )
+        priority = (
+            match_score
+            + candidate.relevance_score
+            + (0.35 if candidate.rejection_reason else 0)
+            + (0.25 if (candidate.source_subtype or "") not in SYNTHESIS_SOURCE_ROLES else 0)
+        )
+        scored_rows.append((priority, row))
+        seen_sources.add(normalized_url)
+
+    return [
+        row
+        for _, row in sorted(
+            scored_rows,
+            key=lambda item: (item[0], item[1].relevance_score, item[1].source_title),
+            reverse=True,
+        )[:limit]
+    ]
+
+
+def counterexample_audit_role(candidate: SourceCandidate, selected_for_synthesis: bool) -> str:
+    subtype = candidate.source_subtype or "unclassified"
+    if candidate.relevance_label == "reject" or candidate.rejection_reason:
+        return "rejected_source_boundary"
+    if subtype and subtype not in SYNTHESIS_SOURCE_ROLES:
+        return "adjacent_source_boundary" if not selected_for_synthesis else "selected_non_reportable_boundary"
+    return ""
+
+
+def best_counterexample_target_claim(
+    candidate: SourceCandidate,
+    ready_claims: list[Claim],
+) -> tuple[Claim | None, float]:
+    if not ready_claims:
+        return None, 0.0
+    text = " ".join(
+        [
+            candidate.title,
+            candidate.snippet,
+            candidate.query,
+            candidate.source_subtype,
+            candidate.source_subtype_reason,
+            candidate.rejection_reason,
+        ]
+    ).lower()
+    best_claim = ready_claims[0]
+    best_score = -1.0
+    for claim in ready_claims:
+        terms = counterexample_target_terms(claim)
+        hits = sum(1 for term in terms if term in text)
+        score = hits / max(1, len(terms))
+        if candidate.source_subtype in (claim.supporting_source_subtypes or []):
+            score -= 0.2
+        if score > best_score:
+            best_claim = claim
+            best_score = score
+    if best_score <= 0 and candidate.relevance_score < 0.25:
+        return None, 0.0
+    return best_claim, max(0.0, best_score)
+
+
+def counterexample_target_terms(claim: Claim) -> list[str]:
+    axis = (
+        cluster_axis_phrase(claim.evidence_cluster_label)
+        if claim.evidence_cluster_label
+        else claim.dimension_label
+    )
+    raw_terms = [
+        claim.dimension,
+        DIMENSION_LABELS.get(claim.dimension, claim.dimension_label),
+        axis,
+        *DIMENSION_KEYWORDS.get(claim.dimension, []),
+    ]
+    terms: list[str] = []
+    for raw in raw_terms:
+        for token in re.findall(r"[a-zA-Z][a-zA-Z0-9_-]{2,}", raw.lower()):
+            if token not in CLUSTER_STOPWORDS and token not in terms:
+                terms.append(token)
+    return terms[:18]
+
+
+def counterexample_audit_only_reason(candidate: SourceCandidate, audit_role: str) -> str:
+    subtype = candidate.source_subtype or "unclassified"
+    if candidate.rejection_reason:
+        return f"source gate rejected it: {candidate.rejection_reason}"
+    if subtype not in SYNTHESIS_SOURCE_ROLES:
+        return f"non-reportable source role: {source_role_label(subtype)}"
+    return f"audit-only {audit_role}; not used as supporting evidence"
+
+
+def counterexample_boundary_challenge(
+    request: ResearchRequest,
+    claim: Claim,
+    candidate: SourceCandidate,
+    audit_role: str,
+) -> str:
+    axis = (
+        cluster_axis_phrase(claim.evidence_cluster_label)
+        if claim.evidence_cluster_label
+        else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+    )
+    subtype = source_role_label(candidate.source_subtype or "unclassified")
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            f"用 {subtype} 检查 {request.target_topic} 中“{axis}”的 source-role 分工是否只在当前角色集合内成立；"
+            "若该相邻/被拒来源在同一任务协议下足以解释结果，则主体命题需要收窄。"
+        )
+    if audit_role == "rejected_source_boundary":
+        return (
+            f"该来源与“{axis}”共享检索语境但被 source gate 拒绝，用来审计命题是否跨出了 "
+            f"{request.target_topic} 的 topic boundary；它只挑战适用边界，不提供正向支撑。"
+        )
+    return (
+        f"用 {subtype} 检查“{axis}”是否只是相邻任务或应用场景中的表面相似机制；"
+        "若相邻来源不能复现同一错误类型或指标变化，应作为负结果边界记录。"
+    )
+
+
+def build_counterexample_audit_section(rows: list[CounterexampleAuditRow], limit: int = 8) -> list[str]:
+    if not rows:
+        return [
+            "当前尚未形成独立 counterexample source audit；下一轮应检索与 report-ready claim 共享关键词但被 source gate 拒绝或属于相邻 source role 的论文。",
+            "这些 source 只用于挑战命题边界，不进入 Evidence extraction、Claim synthesis 或 `g(c)` 证据证书。",
+        ]
+
+    lines = [
+        "以下来源用于挑战 report-ready 命题的适用边界；它们是 audit-only rows，不进入 Evidence extraction、Claim synthesis 或 `g(c)` 证据证书。",
+        "",
+        "| 挑战对象 | audit-only source | 类型 | relevance | 拒绝/审计原因 | 边界挑战 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in rows[:limit]:
+        source = f"{compact_fact(row.source_title, 72)} ({row.source_url})"
+        target = f"{row.target_dimension_label} / {compact_fact(row.target_axis, 60)}"
+        reason = row.audit_only_reason or row.rejection_reason or row.source_subtype_reason
+        lines.append(
+            "|"
+            + "|".join(
+                csv_safe_markdown(value)
+                for value in [
+                    target,
+                    source,
+                    row.audit_role,
+                    f"{row.relevance_score:.2f}",
+                    compact_fact(reason, 120),
+                    compact_fact(row.boundary_challenge, 150),
+                ]
+            )
+            + "|"
+        )
+    return lines
 
 
 def build_grounded_hypotheses(

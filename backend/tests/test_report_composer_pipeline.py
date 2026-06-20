@@ -11,6 +11,7 @@ import pytest
 from cg.orchestrator import pipeline as pipeline_module
 from cg.schemas.research import (
     Claim,
+    CounterexampleAuditRow,
     Evidence,
     MatrixCell,
     ObservabilitySnapshot,
@@ -18,6 +19,7 @@ from cg.schemas.research import (
     QualityGate,
     ResearchRequest,
     RunMetrics,
+    SourceCandidate,
 )
 from cg.settings import Settings
 
@@ -367,6 +369,96 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "本维度当前证据仅支撑待验证观察" not in report
     assert "该 claim" not in report
     assert "不是直接写成领域趋势" in report
+
+
+def test_counterexample_audit_rows_challenge_boundaries_without_supporting_claims() -> None:
+    request = ResearchRequest(
+        project_name="Counterexample audit regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    claim = _report_ready_claim().model_copy(
+        update={"evidence_cluster_label": "counterfactual identifiability and assumptions"}
+    )
+    support_candidate = SourceCandidate(
+        url="/papers/Paper A.pdf",
+        title="Paper A",
+        relevance_label="accept",
+        relevance_score=0.91,
+        source_subtype="core_counterfactual_inference",
+    )
+    rejected_candidate = SourceCandidate(
+        url="/papers/adjacent_recource.pdf",
+        title="Counterfactual recourse fairness under shifted assumptions",
+        snippet="Counterfactual explanation and recourse benchmark with fairness constraints.",
+        query="counterfactual inference identifiability assumptions benchmark",
+        relevance_label="reject",
+        rejection_reason="counterfactual explanation/fairness adjacent to core inference",
+        relevance_score=0.58,
+        source_subtype="counterfactual_explanation_or_fairness",
+        source_subtype_reason="recourse/fairness source, not core inference support",
+    )
+
+    rows = pipeline_module.build_counterexample_audit_rows(
+        request,
+        [claim],
+        [support_candidate, rejected_candidate],
+        selected_source_urls=["/papers/Paper A.pdf"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0].target_claim_id == claim.claim_id
+    assert rows[0].audit_role == "rejected_source_boundary"
+    assert "source gate rejected it" in rows[0].audit_only_reason
+    assert "只挑战适用边界，不提供正向支撑" in rows[0].boundary_challenge
+
+
+def test_analysis_report_renders_counterexample_audit_as_audit_only_section() -> None:
+    request = ResearchRequest(
+        project_name="Counterexample audit report regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready("ev_ready_1", "Paper A"),
+        _evidence_for_report_ready("ev_ready_2", "Paper B"),
+        _evidence_for_report_ready("ev_ready_3", "Paper C"),
+        _evidence_for_report_ready("ev_ready_4", "Paper D"),
+    ]
+    counterexample = CounterexampleAuditRow(
+        audit_id="cex_test",
+        target_claim_id="claim_report_ready",
+        target_dimension="core_counterfactual_inference",
+        target_dimension_label="核心反事实推断",
+        target_axis="可识别性条件、结构因果假设、混杂处理或反事实查询约束",
+        source_title="Counterfactual recourse fairness under shifted assumptions",
+        source_url="/papers/adjacent_recource.pdf",
+        source_subtype="counterfactual_explanation_or_fairness",
+        relevance_score=0.58,
+        relevance_label="reject",
+        rejection_reason="counterfactual explanation/fairness adjacent to core inference",
+        audit_role="rejected_source_boundary",
+        audit_only_reason="source gate rejected it: adjacent source role",
+        boundary_challenge="该来源只挑战适用边界，不提供正向支撑。",
+    )
+
+    report = pipeline_module.build_analysis_report(
+        request,
+        evidence,
+        [_report_ready_claim()],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+        [counterexample],
+    )
+
+    assert "## 反例与负结果审计" in report
+    assert "不进入 Evidence extraction、Claim synthesis 或 `g(c)` 证据证书" in report
+    assert "Counterfactual recourse fairness under shifted assumptions" in report
+    assert "source gate rejected it: adjacent source role" in report
+    evidence_appendix = report.split("## Evidence 附录", 1)[1]
+    assert "Counterfactual recourse fairness under shifted assumptions" not in evidence_appendix
 
 
 def test_formal_evidence_gate_records_cross_role_minimum_certificate() -> None:

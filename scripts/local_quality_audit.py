@@ -25,6 +25,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from cg.agents.research_agents import deterministic_red_team  # noqa: E402
 from cg.orchestrator.pipeline import (  # noqa: E402
     SYNTHESIS_SOURCE_ROLES,
+    build_counterexample_audit_rows,
     build_claims_from_clusters,
     build_evidence_clusters,
     claim_report_ready_reason,
@@ -32,7 +33,7 @@ from cg.orchestrator.pipeline import (  # noqa: E402
     prepare_claims_for_review,
     stable_id,
 )
-from cg.schemas.research import SourceDocument, dimensions_for_topic  # noqa: E402
+from cg.schemas.research import ResearchRequest, SourceDocument, dimensions_for_topic  # noqa: E402
 from cg.settings import Settings  # noqa: E402
 from cg.tools.local_paper_search import LocalPaperSearchTool  # noqa: E402
 
@@ -273,6 +274,16 @@ async def audit_topic(
     rejected = [item for item in candidates if item.url not in accepted_urls]
     selected = accepted[:max_sources]
     dimensions = dimensions_for_topic(topic)
+    request = ResearchRequest(
+        project_name=f"Local Quality Audit {key}",
+        target_topic=topic,
+        topic_description="Local deterministic quality audit; no external LLM calls.",
+        analysis_dimensions=dimensions,
+        max_sources=max_sources,
+        max_sources_per_query=max_results_per_query,
+        max_search_rounds=1,
+        max_research_loops=1,
+    )
 
     documents: list[SourceDocument] = []
     evidence = []
@@ -289,6 +300,12 @@ async def audit_topic(
         claims = build_claims_from_clusters(run_id, clusters, evidence, limit=claim_limit)
         claims = prepare_claims_for_review(claims, evidence)
         claims = deterministic_red_team(claims, evidence)
+    counterexample_audit = build_counterexample_audit_rows(
+        request,
+        claims,
+        candidates,
+        selected_source_urls=[item.url for item in selected],
+    )
 
     claim_statuses = Counter(claim.verification_status for claim in claims)
     claim_types = Counter(claim.claim_type for claim in claims)
@@ -323,6 +340,7 @@ async def audit_topic(
             "mixed_role_verified": mixed_role_verified,
         },
         "quality_diagnostics": quality_diagnostics(accepted, evidence, claims),
+        "counterexample_audit": [row.model_dump(mode="json") for row in counterexample_audit],
         "claims": [claim_row(claim) for claim in claims],
         "clusters": [cluster.model_dump(mode="json") for cluster in clusters],
     }

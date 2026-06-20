@@ -419,6 +419,25 @@ class Claim(BaseModel):
     final_wording: str | None = None
 
 
+class CounterexampleAuditRow(BaseModel):
+    audit_id: str
+    target_claim_id: str
+    target_dimension: str
+    target_dimension_label: str
+    target_axis: str = ""
+    source_title: str = ""
+    source_url: str = ""
+    source_subtype: str = "unclassified"
+    source_subtype_reason: str = ""
+    relevance_score: float = Field(default=0, ge=0, le=1)
+    relevance_label: str = "unscored"
+    rejection_reason: str = ""
+    query: str = ""
+    audit_role: str = "boundary_challenge"
+    boundary_challenge: str = ""
+    audit_only_reason: str = ""
+
+
 class TraceEvent(BaseModel):
     event_id: str
     run_id: str
