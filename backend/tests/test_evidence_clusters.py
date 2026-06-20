@@ -329,6 +329,54 @@ def test_report_ready_claim_requires_more_than_audit_verified() -> None:
     assert claim_report_ready_reason(audit_only) == "sample_limited_observation"
 
 
+def test_high_support_same_role_cluster_can_create_report_ready_synthesis() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Benchmark Paper A",
+            "data_evaluation_engineering",
+            "The benchmark defines task datasets and evaluation metrics.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Benchmark Paper B",
+            "data_evaluation_engineering",
+            "The dataset introduces evaluation tasks and benchmark metrics.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_c1",
+            "Benchmark Paper C",
+            "data_evaluation_engineering",
+            "The evaluation protocol compares benchmark task performance.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_d1",
+            "Benchmark Paper D",
+            "data_evaluation_engineering",
+            "The task benchmark reports dataset-level evaluation metrics.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+
+    assert len(report_ready) == 1
+    claim = report_ready[0]
+    assert claim.claim_type == "comparative"
+    assert claim.source_paper_count == 4
+    assert "范围限定综合结论" in claim.claim
+    assert "不单独构成领域趋势" not in claim.claim
+    assert claim_report_ready_reason(claim) == ""
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),

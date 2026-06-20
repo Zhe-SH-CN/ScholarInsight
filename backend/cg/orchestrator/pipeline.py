@@ -2468,13 +2468,16 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
         paper_count = len({paper_key(ev) for ev in supporting})
         if paper_count < 2:
             continue
-        paper_facts = cluster_paper_facts(supporting)
         source_role_label = SOURCE_ROLE_LABELS.get(source_role, source_role.replace("_", " "))
-        claim_text = (
-            f"作为跨论文对比性观察，{source_role_label} 来源在{cluster.dimension_label}维度"
-            f"呈现出若干互补切入点：{paper_facts}。"
-            "这只说明当前样本内的机制差异，不单独构成领域趋势。"
-        )
+        if cluster_supports_report_ready_synthesis(cluster, supporting):
+            claim_text = report_ready_synthesis_text(cluster, source_role_label, paper_count)
+        else:
+            paper_facts = cluster_paper_facts(supporting)
+            claim_text = (
+                f"作为跨论文对比性观察，{source_role_label} 来源在{cluster.dimension_label}维度"
+                f"呈现出若干互补切入点：{paper_facts}。"
+                "这只说明当前样本内的机制差异，不单独构成领域趋势。"
+            )
         reasoning = (
             f"该 synthesis 只合并同一 source role（{source_role_label}）内的证据，"
             f"覆盖 {paper_count} 篇独立论文。"
@@ -2521,6 +2524,41 @@ def select_cluster_representative_evidence(
             if len(selected) >= max_evidence:
                 return selected
     return selected or evidence[:max_evidence]
+
+
+def cluster_supports_report_ready_synthesis(cluster: EvidenceCluster, supporting: list[Evidence]) -> bool:
+    if cluster.label.startswith("lexical_"):
+        return False
+    if len({paper_key(ev) for ev in supporting}) < 4:
+        return False
+    if len(supporting) < 4:
+        return False
+    if average([ev.confidence for ev in supporting]) < 0.68:
+        return False
+    return True
+
+
+def report_ready_synthesis_text(cluster: EvidenceCluster, source_role_label: str, paper_count: int) -> str:
+    axis = cluster_axis_phrase(cluster.label)
+    return (
+        f"在{cluster.dimension_label}维度，{paper_count} 篇 {source_role_label} 来源"
+        f"共同围绕“{cluster.label}”这一分析轴组织证据，主要体现在{axis}。"
+        f"该结论限定于同一 source role 内的多论文证据，可作为报告主体中的范围限定综合结论。"
+    )
+
+
+def cluster_axis_phrase(label: str) -> str:
+    return {
+        "evaluation and benchmark design": "任务定义、数据集构造、评测指标或对照协议",
+        "verification and reward modeling": "验证器、奖励模型、过程监督或证明检查",
+        "search and inference-time control": "搜索、推理时控制、自一致性或测试时计算",
+        "data generation and training": "数据生成、训练语料、指令调优或蒸馏策略",
+        "modular system pipeline": "模块组合、工具调用、agent workflow 或系统管线",
+        "representation and formalization": "符号表征、形式化表示、程序化描述或自然语言到结构化对象的转换",
+        "uncertainty and probabilistic modeling": "不确定性、概率假设、校准或分布建模",
+        "efficiency and scaling": "效率、扩展性、成本控制或近似工程",
+        "robustness and adversarial analysis": "鲁棒性、失败模式、对抗扰动或偏差分析",
+    }.get(label, label)
 
 
 def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
