@@ -4081,15 +4081,27 @@ def build_analysis_report(
             reverse=True,
         )
         lines.extend([f"### {DIMENSION_LABELS.get(dimension, dimension)}", ""])
-        lines.extend(build_dimension_overview(dimension, dimension_cells))
         report_ready_claims = [claim for claim in dimension_claims if is_report_ready_claim(claim)]
         audit_only_claims = [claim for claim in dimension_claims if not is_report_ready_claim(claim)]
+        lines.extend(build_dimension_overview(dimension, dimension_cells, report_ready_claims))
         if report_ready_claims:
             lines.extend(["", "#### 可进入报告主体的综合结论", ""])
         for claim in report_ready_claims[:4]:
             cite = citations_for_ids(claim.supporting_evidence_ids, citation_numbers)
             wording = compact_fact(best_claim_text(claim), 280)
             lines.append(f"- {wording}{cite}")
+        representative_evidence = report_ready_representative_evidence(
+            dimension,
+            report_ready_claims,
+            evidence,
+        )
+        if representative_evidence:
+            examples = [
+                f"{item.paper or '相关论文'}：{compact_fact(item.fact, 120)}"
+                f"{citations_for_ids([item.evidence_id], citation_numbers)}"
+                for item in representative_evidence[:4]
+            ]
+            lines.append(f"- 代表性支撑证据：{'；'.join(examples)}。")
         if audit_only_claims:
             lines.extend(["", "#### 待验证观察与补证线索", ""])
         for claim in audit_only_claims[:4]:
@@ -4097,15 +4109,10 @@ def build_analysis_report(
             reason = claim_report_ready_reason(claim)
             wording = compact_fact(best_claim_text(claim), 240)
             lines.append(f"- {wording}{cite}（暂不进入主结论：{reason or 'needs_review'}）")
-        if not dimension_claims:
+        if not dimension_claims and has_citable_dimension_cells(dimension_cells):
             lines.extend(build_dimension_fallback_points(dimension_cells, citation_numbers))
-        if dimension_evidence:
-            examples = [
-                f"{item.paper or '相关论文'}：{compact_fact(item.fact, 120)}"
-                f"{citations_for_ids([item.evidence_id], citation_numbers)}"
-                for item in dimension_evidence[:4]
-            ]
-            lines.append(f"- 代表性证据显示，{'；'.join(examples)}。")
+        elif audit_only_claims and not report_ready_claims and dimension_evidence:
+            lines.append("- 本维度当前证据仅支撑待验证观察，不单列为主体代表性证据；详见 Evidence 附录。")
         lines.append("")
 
     lines.extend(["## 可检验研究假设与学术背书", ""])
@@ -4224,6 +4231,33 @@ def report_ready_support_evidence_ids(claims: list[Claim]) -> set[str]:
         if is_report_ready_claim(claim)
         for evidence_id in claim.supporting_evidence_ids
     }
+
+
+def report_ready_representative_evidence(
+    dimension: str,
+    report_ready_claims: list[Claim],
+    evidence: list[Evidence],
+) -> list[Evidence]:
+    support_ids = {
+        evidence_id
+        for claim in report_ready_claims
+        if claim.dimension == dimension
+        for evidence_id in claim.supporting_evidence_ids
+    }
+    if not support_ids:
+        return []
+    return sorted(
+        [
+            item for item in evidence
+            if item.dimension == dimension and item.evidence_id in support_ids
+        ],
+        key=lambda item: item.confidence,
+        reverse=True,
+    )
+
+
+def has_citable_dimension_cells(cells: list[MatrixCell]) -> bool:
+    return any(cell.evidence_count > 0 and cell.status in {"strong", "partial"} for cell in cells)
 
 
 def build_evidence_backed_opportunity_table(
@@ -4361,36 +4395,35 @@ def build_user_attention_analysis(
     claims: list[Claim],
     citation_numbers: dict[str, int],
 ) -> list[str]:
-    attention_order = request.analysis_dimensions or matrix.dimensions or DEFAULT_DIMENSIONS
+    _ = request
+    _ = matrix
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            item.confidence,
+        ),
+        reverse=True,
+    )
     lines: list[str] = []
-    cells_by_dimension: dict[str, list[MatrixCell]] = defaultdict(list)
-    for cell in matrix.cells:
-        cells_by_dimension[cell.dimension].append(cell)
-    for dimension in attention_order:
-        cells = cells_by_dimension.get(dimension, [])
-        if not cells:
+    seen_axes: set[tuple[str, str]] = set()
+    for claim in ready_claims:
+        axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+        key = (claim.dimension, axis)
+        if key in seen_axes:
             continue
-        total = sum(cell.evidence_count for cell in cells)
-        if total <= 0:
-            continue
-        label = DIMENSION_LABELS.get(dimension, dimension)
-        strongest = max(cells, key=lambda item: (item.evidence_count, item.confidence))
-        cite = citations_for_ids(strongest.evidence_ids, citation_numbers)
+        seen_axes.add(key)
+        label = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+        cite = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=3)
+        role_text = role_backing_phrase(claim) or f"{claim.source_paper_count} 篇独立论文"
         lines.append(
-            f"- **{label}** 是本次分析中的高频推理模式之一：相关证据集中在 {strongest.paper} 等论文，"
-            f"说明该方向已有论文反复使用这一类问题重构或机制设计。{cite}"
+            f"- **{label}**：关注 report-ready evidence axis “{axis}”，"
+            f"当前由 {role_text} 支撑；后续写作应围绕该轴设计研究问题、实验协议和失败判据。{cite}"
         )
-    if not lines:
-        verified_claims = [
-            claim for claim in claims
-            if is_report_ready_claim(claim)
-        ]
-        for claim in sorted(verified_claims, key=lambda item: item.confidence, reverse=True)[:4]:
-            lines.append(
-                f"- {compact_fact(best_claim_text(claim), 170)}"
-                f"{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
-            )
-    return lines[:6] or ["- 当前推理模式关注点证据不足，应优先补充代表性论文、最新工作和可复现实验。"]
+        if len(lines) >= 6:
+            break
+    return lines or ["- 当前尚无 report-ready 推理模式关注点；应先补充核心论文、反例和可复现实验，再写入报告主体。"]
 
 
 def build_research_guidance(
@@ -4499,30 +4532,50 @@ def build_matrix_insights(
     return lines or ["- 当前矩阵暂无足够内容生成解读。"]
 
 
-def build_dimension_overview(dimension: str, cells: list[MatrixCell]) -> list[str]:
+def build_dimension_overview(
+    dimension: str,
+    cells: list[MatrixCell],
+    report_ready_claims: list[Claim] | None = None,
+) -> list[str]:
     if not cells:
         return ["当前维度暂无矩阵证据。", ""]
     label = DIMENSION_LABELS.get(dimension, dimension)
     total = sum(cell.evidence_count for cell in cells)
+    report_ready_claims = report_ready_claims or []
+    if report_ready_claims:
+        axes = unique_strings(
+            [
+                cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else label
+                for claim in report_ready_claims[:4]
+            ]
+        )
+        lines = [
+            (
+                f"该维度共关联 {total} 条 Evidence；可进入主体的证据轴是 "
+                f"{'、'.join(axes[:3]) or label}。下方综合结论只基于 report-ready support，"
+                "矩阵覆盖度仅作为审计背景。"
+            ),
+            "",
+        ]
+        return lines
     strong = sorted(
-        [cell for cell in cells if cell.status == "strong"],
+        [cell for cell in cells if cell.status in {"strong", "partial"}],
         key=lambda cell: (cell.evidence_count, cell.confidence),
         reverse=True,
     )
-    weak = sorted(
-        [cell for cell in cells if cell.status in {"weak", "unknown"}],
-        key=lambda cell: (cell.status == "unknown", -cell.evidence_count),
-    )
+    if not strong:
+        return [
+            (
+                f"该维度共关联 {total} 条 Evidence，但当前主要是 weak/single evidence；"
+                "不应把它写成主体结论，后续需补充同轴多论文证据。"
+            ),
+            "",
+        ]
     lines = [
-        (
-            f"该维度共关联 {total} 条 Evidence；"
-            f"强覆盖论文：{compact_paper_names(strong) or '暂无'}；"
-            f"待补证论文：{compact_paper_names(weak) or '暂无'}。"
-        )
+        f"该维度共关联 {total} 条 Evidence；可审计支撑论文：{compact_paper_names(strong) or '暂无'}。"
     ]
-    if cells:
-        best = max(cells, key=lambda cell: (coverage_points(cell), cell.confidence, cell.evidence_count))
-        lines.append(f"{label}当前最可引用的对比锚点是：{best.summary}")
+    best = max(strong, key=lambda cell: (coverage_points(cell), cell.confidence, cell.evidence_count))
+    lines.append(f"{label}当前可引用的对比锚点是：{compact_fact(best.summary, 160)}")
     lines.append("")
     return lines
 
@@ -4551,10 +4604,10 @@ def build_dimension_fallback_points(
     evidence_cells = [
         cell
         for cell in cells
-        if cell.evidence_count > 0 and cell.status != "unknown"
+        if cell.evidence_count > 0 and cell.status in {"strong", "partial"}
     ]
     if not evidence_cells:
-        return ["- 当前维度暂无可引用证据；不应把缺失格写成论文层面的负结论。", ""]
+        return ["- 当前维度只有弱单证据或暂无可引用证据；不应把它写成报告主体结论。", ""]
     for cell in sorted(evidence_cells, key=lambda item: item.evidence_count, reverse=True)[:5]:
         cite = citations_for_ids(cell.evidence_ids, citation_numbers)
         lines.append(
@@ -4691,6 +4744,12 @@ def build_matrix_markdown(
             cell = by_key.get((paper, dimension))
             if not cell or cell.status == "unknown" or cell.evidence_count <= 0:
                 row.append("暂无")
+            elif cell.status == "weak":
+                cite = citations_for_ids(cell.evidence_ids, citation_numbers, limit=2)
+                row.append(
+                    f"weak · {cell.evidence_count}条 · {cell.confidence:.2f}<br/>"
+                    f"仅作审计线索，需同轴多论文证据{cite}"
+                )
             else:
                 summary = compact_fact(cell.summary, 72)
                 cite = citations_for_ids(cell.evidence_ids, citation_numbers, limit=2)

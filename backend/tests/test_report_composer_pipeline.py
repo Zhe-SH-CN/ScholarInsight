@@ -336,8 +336,33 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
     assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
+    assert "关注 report-ready evidence axis" in report
+    assert "代表性支撑证据" in report
+    assert "代表性证据显示" not in report
+    assert "本维度当前证据仅支撑待验证观察" not in report
     assert "该 claim" not in report
     assert "不是直接写成领域趋势" in report
+
+
+def test_analysis_report_does_not_promote_audit_only_representative_evidence() -> None:
+    request = ResearchRequest(
+        project_name="Audit-only representative evidence regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    report = pipeline_module.build_analysis_report(
+        request,
+        [_evidence()],
+        [_claim()],
+        RunMetrics(sources_fetched=1, evidence_count=1, claim_count=1, verified_claim_count=1),
+        _matrix(),
+        [],
+        _observability(),
+    )
+
+    assert "当前尚无 report-ready 推理模式关注点" in report
+    assert "本维度当前证据仅支撑待验证观察" in report
+    assert "代表性证据显示" not in report
 
 
 def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> None:
@@ -403,6 +428,135 @@ def test_dimension_fallback_does_not_expand_unknown_cells() -> None:
     rendered = "\n".join(lines)
     assert "暂无可引用证据" in rendered
     assert "Paper With No Evidence 的核心反事实推断强证据" not in rendered
+
+
+def test_dimension_fallback_does_not_expand_weak_single_evidence_cells() -> None:
+    lines = pipeline_module.build_dimension_fallback_points(
+        [
+            MatrixCell(
+                paper="Weak Evidence Paper",
+                dimension="core_counterfactual_inference",
+                dimension_label="Core Counterfactual Inference",
+                summary="Weak Evidence Paper has one isolated observation.",
+                evidence_count=1,
+                confidence=0.55,
+                source_types=["academic_paper"],
+                evidence_ids=["ev_weak"],
+                status="weak",
+            )
+        ]
+    )
+
+    rendered = "\n".join(lines)
+    assert "只有弱单证据" in rendered
+    assert "Weak Evidence Paper has one isolated observation" not in rendered
+
+
+def test_report_matrix_does_not_expand_weak_single_evidence_cells() -> None:
+    markdown = pipeline_module.build_matrix_markdown(
+        PaperPatternMatrix(
+            generated_at=datetime.now(timezone.utc),
+            papers=["Weak Evidence Paper"],
+            dimensions=["core_counterfactual_inference"],
+            dimension_labels={"core_counterfactual_inference": "Core Counterfactual Inference"},
+            cells=[
+                MatrixCell(
+                    paper="Weak Evidence Paper",
+                    dimension="core_counterfactual_inference",
+                    dimension_label="Core Counterfactual Inference",
+                    summary="Weak Evidence Paper has one isolated observation.",
+                    evidence_count=1,
+                    confidence=0.55,
+                    source_types=["academic_paper"],
+                    evidence_ids=["ev_weak"],
+                    status="weak",
+                )
+            ],
+            coverage_by_paper={"Weak Evidence Paper": 1.0},
+            coverage_by_dimension={"core_counterfactual_inference": 1.0},
+        )
+    )
+
+    assert "仅作审计线索" in markdown
+    assert "Weak Evidence Paper has one isolated observation" not in markdown
+
+
+def test_dimension_overview_uses_report_ready_axis_when_available() -> None:
+    lines = pipeline_module.build_dimension_overview(
+        "core_counterfactual_inference",
+        _matrix_for_report_ready().cells,
+        [_report_ready_claim()],
+    )
+
+    rendered = "\n".join(lines)
+    assert "可进入主体的证据轴" in rendered
+    assert "report-ready support" in rendered
+    assert "当前最可引用" not in rendered
+
+
+def test_dimension_overview_does_not_promote_weak_cells() -> None:
+    lines = pipeline_module.build_dimension_overview(
+        "core_counterfactual_inference",
+        [
+            MatrixCell(
+                paper="Weak Evidence Paper",
+                dimension="core_counterfactual_inference",
+                dimension_label="Core Counterfactual Inference",
+                summary="Weak Evidence Paper has one isolated observation.",
+                evidence_count=1,
+                confidence=0.55,
+                source_types=["academic_paper"],
+                evidence_ids=["ev_weak"],
+                status="weak",
+            )
+        ],
+        [],
+    )
+
+    rendered = "\n".join(lines)
+    assert "weak/single evidence" in rendered
+    assert "Weak Evidence Paper has one isolated observation" not in rendered
+
+
+def test_analysis_report_does_not_repeat_weak_only_dimension_warning() -> None:
+    request = ResearchRequest(
+        project_name="Weak-only dimension warning regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    report = pipeline_module.build_analysis_report(
+        request,
+        [],
+        [],
+        RunMetrics(sources_fetched=1, evidence_count=1, claim_count=0, verified_claim_count=0),
+        PaperPatternMatrix(
+            generated_at=datetime.now(timezone.utc),
+            papers=["Weak Evidence Paper"],
+            dimensions=["core_counterfactual_inference"],
+            dimension_labels={"core_counterfactual_inference": "Core Counterfactual Inference"},
+            cells=[
+                MatrixCell(
+                    paper="Weak Evidence Paper",
+                    dimension="core_counterfactual_inference",
+                    dimension_label="Core Counterfactual Inference",
+                    summary="Weak Evidence Paper has one isolated observation.",
+                    evidence_count=1,
+                    confidence=0.55,
+                    source_types=["academic_paper"],
+                    evidence_ids=["ev_weak"],
+                    status="weak",
+                )
+            ],
+            coverage_by_paper={"Weak Evidence Paper": 1.0},
+            coverage_by_dimension={"core_counterfactual_inference": 1.0},
+        ),
+        [],
+        _observability(),
+    )
+
+    assert "weak/single evidence" in report
+    assert "当前维度只有弱单证据" not in report
+    assert "Weak Evidence Paper has one isolated observation" not in report
 
 
 def test_matrix_insights_prefer_report_ready_evidence_axes() -> None:
