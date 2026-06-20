@@ -406,6 +406,104 @@ def test_causal_reasoning_target_topic_overrides_counterfactual_inference_terms(
     ) == ""
 
 
+def test_causal_reasoning_llm_gate_rejects_multimodal_causal_discovery_drift() -> None:
+    paper = {
+        "title": "Revealing Multimodal Causality with Large Language Models",
+        "abstract": (
+            "Uncovering cause-and-effect mechanisms from multimodal data is a "
+            "causal discovery task. The method uses large language models to "
+            "extract factors from images and text."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/multimodal_causality.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs benchmark and counterfactual evaluation",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
+def test_causal_reasoning_llm_gate_rejects_alignment_causal_framing_drift() -> None:
+    paper = {
+        "title": "Preference Learning for AI Alignment: a Causal Perspective",
+        "abstract": (
+            "Reward modelling from preference data is crucial for aligning large "
+            "language models. This work frames preference learning in a causal "
+            "paradigm for robust generalisation."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/preference_alignment_causal.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs robustness confounding",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert _index()._topic_rejection_reason(
+        "Causal Reasoning with LLMs robustness confounding",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    ) == subtype.rejection_reason
+
+
+def test_causal_reasoning_llm_gate_rejects_modality_process_reward_drift() -> None:
+    paper = {
+        "title": "Incentivizing Consistent, Effective and Scalable Reasoning Capability in Audio LLMs via Reasoning Process Rewards",
+        "abstract": (
+            "The method improves audio LLM reasoning with reasoning process rewards "
+            "and reduces hallucinations, but it does not evaluate causal reasoning "
+            "or counterfactual reasoning ability."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/audio_llm_process_rewards.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs evaluation protocol",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
+def test_causal_reasoning_llm_gate_rejects_uncertain_text_reasoning_drift() -> None:
+    paper = {
+        "title": "Reasoning over Uncertain Text by Generative Large Language Models",
+        "abstract": (
+            "This paper introduces a Bayesian Linguistic Inference Dataset for "
+            "probabilistic reasoning over uncertain text and evaluates prompting "
+            "strategies, with an adaptation of a causal reasoning question-answering dataset."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/uncertain_text_llm.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs robustness confounding",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "llm_reasoning_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query requires causal/counterfactual reasoning as the primary task"
+    )
+
+
 def test_counterfactual_inference_gate_rejects_generic_bayes() -> None:
     paper = {
         "title": "Large Language Bayes",

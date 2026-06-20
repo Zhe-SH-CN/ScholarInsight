@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
+import pytest
+
+from cg.orchestrator import pipeline as pipeline_module
 from cg.orchestrator.pipeline import ResearchPipeline, build_paper_pattern_matrix, select_matrix_papers
-from cg.schemas.research import Evidence, ResearchRequest
+from cg.schemas.research import Claim, Evidence, ResearchRequest
 from cg.settings import Settings
 
 
@@ -53,6 +57,68 @@ def test_interim_matrix_uses_real_evidence_papers() -> None:
 
     assert papers == ["GraphRAG Paper A", "GraphRAG Paper B"]
     assert matrix.coverage_by_dimension["modular_pipeline_composition"] > 0
+
+
+class FailingReviewAgent:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def review(self, claims, evidence):
+        raise RuntimeError("simulated red-team failure")
+
+
+@pytest.mark.asyncio
+async def test_red_team_fallback_records_trace_and_writes_claims(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(pipeline_module, "AnalysisAndReviewAgent", FailingReviewAgent)
+    pipeline = ResearchPipeline(
+        Settings(
+            cg_data_dir=str(tmp_path),
+            scholar_paper_index_path=str(tmp_path / "missing_paper_index.json"),
+            deepseek_api_key="",
+            gemini_api_key="",
+            mimo_api_key="",
+        )
+    )
+    request = ResearchRequest(
+        project_name="Red-team fallback regression",
+        target_topic="Causal Reasoning with LLMs",
+        analysis_dimensions=["llm_causal_benchmarking"],
+    )
+    status = await pipeline.prepare_run(request, owner="test")
+    evidence = [_evidence("ev_redteam", "Causal Benchmark Paper", "llm_causal_benchmarking")]
+    claims = [
+        Claim(
+            claim_id="claim_redteam",
+            run_id=status.run_id,
+            dimension="llm_causal_benchmarking",
+            dimension_label="LLM causal benchmarking",
+            claim="Causal Benchmark Paper provides a bounded observation.",
+            supporting_evidence_ids=["ev_redteam"],
+            confidence=0.8,
+            risk_level="low",
+            reasoning_summary="Supported by one evidence item.",
+            verification_status="verified",
+            claim_type="single_paper_observation",
+            source_paper_count=1,
+            evidence_support_level="single_paper",
+        )
+    ]
+
+    reviewed = await pipeline.red_team(status.run_id, claims, evidence)
+
+    run_dir = pipeline.runs.run_dir(status.run_id)
+    assert reviewed
+    assert (run_dir / "exports" / "claim_backlog.json").exists()
+    assert (run_dir / "claims" / "claim_redteam.json").exists()
+    trace_statuses = {
+        json.loads(line)["status"]
+        for line in (run_dir / "trace" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert "red_team_review_started" in trace_statuses
+    assert "red_team_review_failed" in trace_statuses
+    assert "red_team_review_fallback" in trace_statuses
+    assert "red_team_review_completed" in trace_statuses
 
 
 def _evidence(evidence_id: str, paper: str, dimension: str) -> Evidence:

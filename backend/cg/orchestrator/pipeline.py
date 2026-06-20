@@ -24,6 +24,7 @@ from cg.agents import (
     ResearchPlanningAgent,
     SourceResearchAgent,
 )
+from cg.agents.research_agents import deterministic_red_team
 from cg.llm import LLMClient
 from cg.repositories.base import append_jsonl, atomic_write_json, write_text
 from cg.repositories.evidence import EvidenceRepository
@@ -1357,13 +1358,111 @@ class ResearchPipeline:
                 run_id, node, phase, status, message, payload
             ),
         )
-        reviewed = await AnalysisAndReviewAgent(red_team_ctx).review(claims, evidence)
+        reviewed = await self._run_red_team_review(
+            run_id,
+            AnalysisAndReviewAgent(red_team_ctx).review(claims, evidence),
+            claims,
+            evidence,
+        )
         reviewed = apply_claim_discipline(reviewed, evidence)
         run_dir = self.runs.run_dir(run_id)
         await atomic_write_json(run_dir / "exports" / "claim_backlog.json", claim_backlog_rows(reviewed, evidence))
         for claim in reviewed:
             await atomic_write_json(run_dir / "claims" / f"{claim.claim_id}.json", claim)
             await append_jsonl(run_dir / "claims" / "_index.jsonl", claim)
+        return reviewed
+
+    async def _run_red_team_review(
+        self,
+        run_id: str,
+        value: Awaitable[list[Claim]],
+        claims: list[Claim],
+        evidence: list[Evidence],
+    ) -> list[Claim]:
+        timeout_seconds = self._llm_step_timeout_seconds()
+        await self.trace(
+            run_id,
+            "AnalysisAndReviewAgent",
+            "progress",
+            "red_team_review_started",
+            "开始执行 Red Team claim 审查",
+            {"claim_count": len(claims), "timeout_seconds": timeout_seconds},
+        )
+
+        async def heartbeat() -> None:
+            elapsed = 0
+            while True:
+                await asyncio.sleep(60)
+                elapsed += 60
+                await self.trace(
+                    run_id,
+                    "AnalysisAndReviewAgent",
+                    "progress",
+                    "red_team_review_heartbeat",
+                    f"Red Team 审查进行中：已等待 {elapsed}s",
+                    {
+                        "claim_count": len(claims),
+                        "elapsed_seconds": elapsed,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+
+        heartbeat_task = asyncio.create_task(heartbeat())
+        try:
+            reviewed = await asyncio.wait_for(value, timeout=timeout_seconds)
+        except asyncio.TimeoutError:
+            await self.trace(
+                run_id,
+                "AnalysisAndReviewAgent",
+                "error",
+                "red_team_review_timeout",
+                f"Red Team 审查超过 {timeout_seconds:.0f}s",
+                {"claim_count": len(claims), "timeout_seconds": timeout_seconds},
+            )
+            reviewed = deterministic_red_team(claims, evidence)
+            await self.trace(
+                run_id,
+                "AnalysisAndReviewAgent",
+                "progress",
+                "red_team_review_fallback",
+                "Red Team LLM 超时，已使用确定性审查 fallback",
+                {"claim_count": len(reviewed), "reason": "timeout"},
+            )
+        except Exception as exc:
+            await self.trace(
+                run_id,
+                "AnalysisAndReviewAgent",
+                "error",
+                "red_team_review_failed",
+                "Red Team 审查失败",
+                {"claim_count": len(claims), "error_type": exc.__class__.__name__, "error": str(exc)[:500]},
+            )
+            reviewed = deterministic_red_team(claims, evidence)
+            await self.trace(
+                run_id,
+                "AnalysisAndReviewAgent",
+                "progress",
+                "red_team_review_fallback",
+                "Red Team LLM 失败，已使用确定性审查 fallback",
+                {"claim_count": len(reviewed), "reason": exc.__class__.__name__},
+            )
+        finally:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+
+        await self.trace(
+            run_id,
+            "AnalysisAndReviewAgent",
+            "progress",
+            "red_team_review_completed",
+            "Red Team claim 审查完成",
+            {
+                "claim_count": len(reviewed),
+                "verified": len([claim for claim in reviewed if claim.verification_status == "verified"]),
+                "challenged": len([claim for claim in reviewed if claim.verification_status != "verified"]),
+            },
+        )
         return reviewed
 
     async def save_artifacts(self, run_id: str, artifacts: dict) -> None:
@@ -1506,6 +1605,9 @@ class ResearchPipeline:
         return fallbacks
 
     def _report_step_timeout_seconds(self) -> float:
+        return self._llm_step_timeout_seconds()
+
+    def _llm_step_timeout_seconds(self) -> float:
         return float(max(60, min(600, self.settings.cg_llm_timeout_seconds + 60)))
 
     async def _run_report_step(

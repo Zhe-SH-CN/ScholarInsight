@@ -1048,6 +1048,11 @@ class LocalPaperIndex:
                 "benchmarking llms against statistical pitfalls in causal inference",
                 "evaluate large language models on causal",
                 "evaluates large language models on causal",
+                "evaluating explicit causal reasoning in large language models",
+                "counterfactual reasoning in large language models",
+                "llms for counterfactual reasoning",
+                "language models for counterfactual reasoning",
+                "causal reasoning tasks",
                 "llm causal reasoning",
                 "llms' causal reasoning",
                 "llms causal reasoning",
@@ -1058,6 +1063,47 @@ class LocalPaperIndex:
                 "rag_or_retrieval_adjacent",
                 "paper uses causal language inside RAG/retrieval/QA rather than studying LLM causal reasoning ability",
                 "Causal reasoning with LLMs query excludes RAG/retrieval/QA papers unless they evaluate LLM causal reasoning",
+            )
+        causal_application_drift = any(
+            marker in primary
+            for marker in (
+                "causal discovery",
+                "uncovering cause-and-effect mechanisms",
+                "multimodal causality",
+                "attention causality",
+                "preference learning",
+                "ai alignment",
+                "reward modelling",
+                "reward modeling",
+                "causality-driven robust optimization",
+                "boosting resilience",
+                "modality prior-induced hallucinations",
+                "audio llm",
+                "audio llms",
+                "reasoning process rewards",
+                "process rewards",
+            )
+        )
+        if causal_application_drift and not explicit_llm_causal_eval:
+            return SourceSubtype(
+                "causal_application_adjacent",
+                "paper applies causal framing to discovery, alignment, robustness, modality, or process-reward settings rather than evaluating LLM causal reasoning ability",
+                "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning",
+            )
+        generic_uncertainty_reasoning = any(
+            marker in primary
+            for marker in (
+                "uncertain text",
+                "probabilistic reasoning",
+                "bayesian linguistic inference",
+                "probabilistic logical programming",
+            )
+        )
+        if generic_uncertainty_reasoning and "causal" not in title and "counterfactual" not in title:
+            return SourceSubtype(
+                "llm_reasoning_adjacent",
+                "paper primarily studies probabilistic or uncertainty reasoning rather than LLM causal reasoning",
+                "Causal reasoning with LLMs query requires causal/counterfactual reasoning as the primary task",
             )
         has_llm = any(
             marker in primary
