@@ -307,6 +307,63 @@ def test_report_ready_summary_keeps_cross_role_contrast_readable() -> None:
     assert "agent..." not in summary
 
 
+def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
+    request = ResearchRequest(
+        project_name="Grounded hypothesis regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready("ev_ready_1", "Paper A"),
+        _evidence_for_report_ready("ev_ready_2", "Paper B"),
+        _evidence_for_report_ready("ev_ready_3", "Paper C"),
+        _evidence_for_report_ready("ev_ready_4", "Paper D"),
+    ]
+    claim = _report_ready_claim()
+
+    report = pipeline_module.build_analysis_report(
+        request,
+        evidence,
+        [claim],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+    )
+
+    assert "## 可检验研究假设与学术背书" in report
+    assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
+    assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
+    assert "该 claim" not in report
+    assert "不是直接写成领域趋势" in report
+
+
+def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> None:
+    request = ResearchRequest(
+        project_name="Grounded recommendation regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready("ev_ready_1", "Paper A"),
+        _evidence_for_report_ready("ev_ready_2", "Paper B"),
+        _evidence_for_report_ready("ev_ready_3", "Paper C"),
+        _evidence_for_report_ready("ev_ready_4", "Paper D"),
+    ]
+    recommendations = pipeline_module.build_recommendations(
+        "run_test",
+        request,
+        [_report_ready_claim()],
+        evidence,
+        _matrix_for_report_ready(),
+    )
+
+    assert len(recommendations) == 1
+    assert recommendations[0].title == "将核心反事实推断中的多论文共识转化为可复现实验协议"
+    assert "可复现实验协议" in recommendations[0].recommendation
+    assert recommendations[0].rationale.startswith("这一综合判断由 4 篇独立论文")
+
+
 def _evidence() -> Evidence:
     now = datetime.now(timezone.utc)
     return Evidence(

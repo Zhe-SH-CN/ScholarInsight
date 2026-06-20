@@ -3353,26 +3353,27 @@ def build_recommendations(
         evidence_ids = unique_strings(
             [ev_id for claim in strategic_claims[:3] for ev_id in claim.supporting_evidence_ids]
         )
+        lead_claim = strategic_claims[0]
         recommendations.append(
             OpportunityRecommendation(
                 recommendation_id=stable_id("rec", f"{run_id}:strategy:{evidence_ids}"),
-                title="把机会点绑定到已验证证据链",
-                recommendation=(
-                    f"围绕 {request.target_topic} 的研究方向建立 2-3 个可验证机会主题，"
-                    "每个主题都绑定 Evidence、Claim 与 Red Team 审查结果。"
-                ),
+                title=grounded_opportunity_title(lead_claim),
+                recommendation=grounded_opportunity_text(request, lead_claim),
                 priority="high",
                 target_audience="researcher",
-                rationale=best_claim_text(strategic_claims[0]),
-                expected_value="让论文分析从一次性报告变成可审计的研究决策输入。",
+                rationale=grounded_backing_text(lead_claim),
+                expected_value="把综述观察转化为带证据边界的可检验研究假设，降低选题阶段的主观跳跃。",
                 based_on_claim_ids=[claim.claim_id for claim in strategic_claims[:3]],
                 evidence_ids=evidence_ids[:8],
                 next_steps=[
-                    "选择一条高置信度 Claim 进入研究方向评审",
-                    "对 Red Team 标记的低证据结论安排二次采集",
-                    "将关键 Evidence 纳入汇报附录，避免无来源判断",
+                    f"围绕 {DIMENSION_LABELS.get(lead_claim.dimension, lead_claim.dimension)} 写出一个可检验 research question",
+                    "把支持这一综合判断的论文按 source role 分组，分别设计实验协议、数据需求和失败判据",
+                    "优先补充反例或边界论文，确认该机会不是检索样本造成的局部现象",
                 ],
-                risks=["当前系统只使用公开论文资料，研究结论仍需结合领域知识校验。"],
+                risks=[
+                    "该机会来自本地论文证据综合，不等于已经验证的新方法贡献。",
+                    "正式写作前仍需人工复核原文、补充反例和实验可行性分析。",
+                ],
                 confidence=round(average([claim.confidence for claim in strategic_claims[:3]]), 3),
             )
         )
@@ -3409,6 +3410,11 @@ def build_recommendations(
             )
         )
 
+    weak_dimensions = [
+        dimension
+        for dimension in weak_dimensions
+        if matrix.coverage_by_dimension.get(dimension, 0) < 0.58
+    ]
     if weak_dimensions:
         dimension = weak_dimensions[0]
         evidence_ids = [
@@ -3464,6 +3470,50 @@ def build_recommendations(
         )
 
     return recommendations[:5]
+
+
+def grounded_opportunity_title(claim: Claim) -> str:
+    dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+    if claim.claim_type == "cross_role_contrast":
+        return f"把{dimension}中的来源角色分工转化为可检验研究问题"
+    return f"将{dimension}中的多论文共识转化为可复现实验协议"
+
+
+def grounded_opportunity_text(request: ResearchRequest, claim: Claim) -> str:
+    dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+    axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
+    if claim.claim_type == "cross_role_contrast":
+        role_text = role_backing_phrase(claim)
+        return (
+            f"围绕 {request.target_topic} 的 {dimension} 方向，构造一个检验“{axis}”的研究问题："
+            f"比较并连接 {role_text} 的证据分工，观察同一协议下的任务定义、方法机制和失败模式是否一致。"
+        )
+    return (
+        f"围绕 {request.target_topic} 的 {dimension} 方向，把“{axis}”从综述性观察改写为可复现实验协议，"
+        "明确任务输入、评价指标、对照设置和失败判据。"
+    )
+
+
+def grounded_backing_text(claim: Claim) -> str:
+    role_text = role_backing_phrase(claim)
+    support = f"{claim.source_paper_count} 篇独立论文"
+    if role_text:
+        support = f"{support}（{role_text}）"
+    axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+    return (
+        f"这一综合判断由 {support}支撑，且限定在“{axis}”这一证据轴；"
+        "因此适合作为 research question 的起点，而不是直接写成领域趋势。"
+    )
+
+
+def role_backing_phrase(claim: Claim) -> str:
+    counts = claim.supporting_source_subtype_paper_counts or {}
+    if not counts:
+        return ""
+    return "；".join(
+        f"{source_role_label(role)} {count} 篇"
+        for role, count in sorted(counts.items(), key=lambda item: (-item[1], source_role_label(item[0])))
+    )
 
 
 def build_observability(
@@ -3649,7 +3699,7 @@ def extract_evidence_from_document(
             if sentence in used_quotes or len(sentence) < 45:
                 continue
             used_quotes.add(sentence)
-            paper = detect_entity(sentence, document.title, document.url, entities)
+            paper = detect_entity(sentence, document.title, document.url, entities) or document.title
             quote = sentence[:500]
             fact = build_fact(quote, paper, dimension)
             confidence = min(0.95, 0.38 + score * 0.09 + source_weight(document.source_type))
@@ -3682,6 +3732,7 @@ def extract_evidence_from_document(
             break
     if not evidence_items and sentences:
         sentence = max(sentences, key=len)[:500]
+        paper = detect_entity(sentence, document.title, document.url, entities) or document.title
         evidence_items.append(
             Evidence(
                 evidence_id=stable_id("ev", f"{run_id}:{document.url}:real_text:{sentence}"),
@@ -3693,8 +3744,8 @@ def extract_evidence_from_document(
                 source_type=document.source_type,
                 dimension="other",
                 dimension_label=DIMENSION_LABELS["other"],
-                paper=detect_entity(sentence, document.title, document.url, entities),
-                fact=build_fact(sentence, None, "other"),
+                paper=paper,
+                fact=build_fact(sentence, paper, "other"),
                 quote=sentence,
                 source_title=document.title,
                 source_url=document.url,
@@ -4049,6 +4100,10 @@ def build_analysis_report(
             lines.append(f"- 代表性证据显示，{'；'.join(examples)}。")
         lines.append("")
 
+    lines.extend(["## 可检验研究假设与学术背书", ""])
+    lines.extend(build_grounded_hypotheses(request, claims, citation_numbers))
+    lines.append("")
+
     lines.extend(["## 研究机会与下一步", ""])
     if recommendations:
         for item in recommendations[:5]:
@@ -4152,6 +4207,54 @@ def citations_for_ids(evidence_ids: list[str], citation_numbers: dict[str, int],
         if len(numbers) >= limit:
             break
     return "".join(f"[{number}]" for number in numbers)
+
+
+def build_grounded_hypotheses(
+    request: ResearchRequest,
+    claims: list[Claim],
+    citation_numbers: dict[str, int],
+    limit: int = 3,
+) -> list[str]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            item.confidence,
+        ),
+        reverse=True,
+    )[:limit]
+    if not ready_claims:
+        return [
+            "当前尚未形成足够强的 report-ready synthesis；不应强行提出研究假设，应先补充核心论文和反例证据。"
+        ]
+
+    lines: list[str] = []
+    for index, claim in enumerate(ready_claims, start=1):
+        dimension = DIMENSION_LABELS.get(claim.dimension, claim.dimension)
+        citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers)
+        axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
+        if claim.claim_type == "cross_role_contrast":
+            hypothesis = (
+                f"在 {request.target_topic} 的 {dimension} 中，检验不同 source role 在“{axis}”上的分工是否可以"
+                "形成同一套可复现评测或方法协议。"
+            )
+        else:
+            hypothesis = (
+                f"在 {request.target_topic} 的 {dimension} 中，将“{axis}”固化为可复现实验协议，"
+                "检验现有多论文共识是否能跨任务、数据集或方法设置保持成立。"
+            )
+        lines.extend(
+            [
+                f"### H{index}. {grounded_opportunity_title(claim)}",
+                "",
+                f"- **研究假设**：{hypothesis}{citations}",
+                f"- **证据背书**：{grounded_backing_text(claim)}",
+                "- **边界条件**：该假设只由当前 report-ready evidence 支撑；正式写作前需要补充反例、消融设置和人工原文复核。",
+                "",
+            ]
+        )
+    return lines
 
 
 def build_target_advantage_analysis(

@@ -138,6 +138,8 @@ def test_deterministic_evidence_uses_scientific_topic_dimensions() -> None:
     assert "other" not in dimensions
     assert "scientific_problem_benchmarking" in dimensions
     assert "tool_augmented_scientific_reasoning" in dimensions
+    assert {item.paper for item in evidence} == {"Scientific Benchmark"}
+    assert all(item.fact.startswith("Scientific Benchmark 在") for item in evidence)
 
 
 def test_deterministic_evidence_uses_mathematical_topic_dimensions() -> None:
