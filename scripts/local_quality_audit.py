@@ -27,6 +27,7 @@ from cg.orchestrator.pipeline import (  # noqa: E402
     SYNTHESIS_SOURCE_ROLES,
     build_claims_from_clusters,
     build_evidence_clusters,
+    claim_report_ready_reason,
     extract_evidence_from_document,
     prepare_claims_for_review,
     stable_id,
@@ -142,7 +143,7 @@ def quality_diagnostics(accepted: list[Any], evidence: list[Any], claims: list[A
         count for subtype, count in accepted_subtypes.items() if subtype not in SYNTHESIS_SOURCE_ROLES
     )
     other_dimension_count = evidence_dimensions.get("other", 0)
-    report_worthy_verified_count = sum(
+    audit_verified_synthesis_count = sum(
         1
         for claim in claims
         if claim.verification_status == "verified"
@@ -150,6 +151,10 @@ def quality_diagnostics(accepted: list[Any], evidence: list[Any], claims: list[A
         and claim.risk_level != "high"
         and not claim.backlog_reason
     )
+    report_ready_rejection_reasons = Counter(
+        reason for claim in claims if (reason := claim_report_ready_reason(claim))
+    )
+    report_ready_verified_count = len(claims) - sum(report_ready_rejection_reasons.values())
     verified_single_paper_count = sum(
         1
         for claim in claims
@@ -167,8 +172,12 @@ def quality_diagnostics(accepted: list[Any], evidence: list[Any], claims: list[A
         flags.append("accepted_sources_include_non_reportable_roles")
     if evidence and ratio(other_dimension_count, len(evidence)) >= 0.5:
         flags.append("evidence_dimensions_collapse_to_other")
-    if claims and report_worthy_verified_count == 0:
-        flags.append("no_report_worthy_verified_synthesis")
+    if claims and audit_verified_synthesis_count == 0:
+        flags.append("no_audit_verified_synthesis")
+    if claims and report_ready_verified_count == 0:
+        flags.append("no_report_ready_verified_synthesis")
+    if audit_verified_synthesis_count and report_ready_verified_count == 0:
+        flags.append("audit_verified_claims_not_report_ready")
     if claims and claim_statuses.get("verified", 0) == 0:
         flags.append("no_verified_claims")
 
@@ -181,7 +190,10 @@ def quality_diagnostics(accepted: list[Any], evidence: list[Any], claims: list[A
         "other_dimension_ratio": ratio(other_dimension_count, len(evidence)),
         "claim_statuses": claim_statuses,
         "claim_types": claim_types,
-        "report_worthy_verified_count": report_worthy_verified_count,
+        "audit_verified_synthesis_count": audit_verified_synthesis_count,
+        "report_ready_verified_count": report_ready_verified_count,
+        "report_worthy_verified_count": report_ready_verified_count,
+        "report_ready_rejection_reasons": report_ready_rejection_reasons,
         "verified_single_paper_observation_count": verified_single_paper_count,
         "quality_flags": flags,
     }

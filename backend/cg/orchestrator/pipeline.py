@@ -2804,11 +2804,59 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
     return claims
 
 
+def claim_report_ready_reason(claim: Claim) -> str:
+    """Return an empty string only when a claim is strong enough for report body use."""
+    if claim.verification_status != "verified":
+        return f"red_team_{claim.verification_status}"
+    if claim.risk_level == "high":
+        return "high_risk"
+    if claim.backlog_reason:
+        return claim.backlog_reason
+    if claim.claim_type not in {"comparative", "cross_role_contrast"}:
+        return "not_synthesis_claim"
+    if claim.source_paper_count < 2:
+        return "insufficient_independent_papers"
+    if len(claim.supporting_evidence_ids) < 2:
+        return "insufficient_evidence"
+    if claim.evidence_support_level != "strong":
+        return "weak_evidence_support"
+    source_roles = set(claim.supporting_source_subtypes or [])
+    if not source_roles:
+        return "missing_source_role_counts"
+    if not source_roles.issubset(SYNTHESIS_SOURCE_ROLES):
+        return "unsupported_source_role"
+    text = best_claim_text(claim)
+    if any(
+        marker in text
+        for marker in (
+            "当前样本内",
+            "不单独构成领域趋势",
+            "不作为统一领域趋势",
+            "作为单论文观察",
+        )
+    ):
+        return "sample_limited_observation"
+    lowered = text.lower()
+    if "..." in text or "…" in text:
+        return "truncated_or_fragmentary_wording"
+    if re.search(
+        r"(submitted to|available at https?://|https?://github|code and dataset|figure [0-9]|section [0-9])",
+        lowered,
+    ):
+        return "artifact_or_citation_fragment"
+    return ""
+
+
+def is_report_ready_claim(claim: Claim) -> bool:
+    return claim_report_ready_reason(claim) == ""
+
+
 def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[dict[str, Any]]:
     by_id = {ev.evidence_id: ev for ev in evidence}
     rows: list[dict[str, Any]] = []
     for claim in claims:
-        if not claim.backlog_reason and claim.verification_status == "verified":
+        report_ready_rejection_reason = claim_report_ready_reason(claim)
+        if not report_ready_rejection_reason:
             continue
         supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
         rows.append(
@@ -2821,7 +2869,10 @@ def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[di
                 "evidence_cluster_label": claim.evidence_cluster_label,
                 "verification_status": claim.verification_status,
                 "risk_level": claim.risk_level,
-                "backlog_reason": claim.backlog_reason or f"red_team_{claim.verification_status}",
+                "backlog_reason": claim.backlog_reason
+                or report_ready_rejection_reason
+                or f"red_team_{claim.verification_status}",
+                "report_ready_rejection_reason": report_ready_rejection_reason,
                 "source_paper_count": claim.source_paper_count,
                 "supporting_evidence_count": len(claim.supporting_evidence_ids),
                 "supporting_papers": sorted({paper_key(ev) for ev in supporting}),
@@ -2860,7 +2911,7 @@ def build_recommendations(
     strategic_claims = [
         claim
         for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
-        if claim.verification_status == "verified" and claim.risk_level != "high"
+        if is_report_ready_claim(claim)
     ][:3]
     if strategic_claims:
         evidence_ids = unique_strings(
@@ -2893,7 +2944,7 @@ def build_recommendations(
         weak_claims = [
             claim
             for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
-            if claim.verification_status in {"needs_evidence", "challenged"} and claim.risk_level != "high"
+            if not is_report_ready_claim(claim) and claim.risk_level != "high"
         ][:5]
         evidence_ids = unique_strings(
             [ev_id for claim in weak_claims for ev_id in claim.supporting_evidence_ids]
@@ -3445,7 +3496,7 @@ def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, cl
 
     verified = [
         claim for claim in claims
-        if claim.verification_status == "verified" and claim.risk_level != "high"
+        if is_report_ready_claim(claim)
     ]
     lead_claims = sorted(verified, key=lambda item: item.confidence, reverse=True)[:3]
     if lead_claims:
@@ -3664,7 +3715,7 @@ def build_target_advantage_analysis(
         lead_claims = sorted(
             [
                 claim for claim in claims
-                if claim.verification_status == "verified" and claim.risk_level != "high"
+                if is_report_ready_claim(claim)
             ],
             key=lambda item: item.confidence,
             reverse=True,
@@ -3706,7 +3757,7 @@ def build_user_attention_analysis(
     if not lines:
         verified_claims = [
             claim for claim in claims
-            if claim.verification_status == "verified" and claim.risk_level != "high"
+            if is_report_ready_claim(claim)
         ]
         for claim in sorted(verified_claims, key=lambda item: item.confidence, reverse=True)[:4]:
             lines.append(

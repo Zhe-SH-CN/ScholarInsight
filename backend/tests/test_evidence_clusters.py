@@ -9,6 +9,8 @@ from cg.orchestrator.pipeline import (
     apply_claim_discipline,
     build_claims_from_clusters,
     build_evidence_clusters,
+    claim_report_ready_reason,
+    is_report_ready_claim,
     prepare_claims_for_review,
 )
 from cg.schemas.research import Claim, Evidence
@@ -294,6 +296,37 @@ def test_deterministic_red_team_preserves_cross_role_contrast_type() -> None:
     assert disciplined[0].claim_type == "cross_role_contrast"
     assert disciplined[0].verification_status == "verified"
     assert disciplined[0].backlog_reason == ""
+
+
+def test_report_ready_claim_requires_more_than_audit_verified() -> None:
+    ready = Claim(
+        claim_id="claim_ready",
+        run_id="run_test",
+        dimension="llm_causal_benchmarking",
+        dimension_label="LLM causal benchmarking",
+        claim="Two benchmark papers independently show that causal reasoning evaluations isolate intervention and counterfactual failure modes.",
+        supporting_evidence_ids=["ev_a1", "ev_b1"],
+        confidence=0.82,
+        risk_level="low",
+        reasoning_summary="Supported by two benchmark papers.",
+        verification_status="verified",
+        claim_type="comparative",
+        source_paper_count=2,
+        evidence_support_level="strong",
+        supporting_source_subtypes=["causal_reasoning_benchmark"],
+        supporting_source_subtype_counts={"causal_reasoning_benchmark": 2},
+    )
+    audit_only = ready.model_copy(
+        update={
+            "claim_id": "claim_audit_only",
+            "claim": "作为跨论文对比性观察，benchmark 来源呈现互补切入点。这只说明当前样本内的机制差异，不单独构成领域趋势。",
+        }
+    )
+
+    assert is_report_ready_claim(ready)
+    assert claim_report_ready_reason(ready) == ""
+    assert not is_report_ready_claim(audit_only)
+    assert claim_report_ready_reason(audit_only) == "sample_limited_observation"
 
 
 def test_evidence_clusters_track_verified_claims() -> None:
