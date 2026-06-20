@@ -129,6 +129,230 @@ def query_phrases(terms: list[str]) -> list[str]:
     return phrases[:8]
 
 
+BAD_TITLE_PREFIXES = (
+    "findings of the association",
+    "proceedings of the",
+    "published as a conference paper",
+    "under review as a conference paper",
+)
+
+TITLE_STOPWORDS = {
+    "anonymous authors",
+    "paper under double-blind review",
+    "abstract",
+}
+
+TITLE_SKIP_PREFIXES = BAD_TITLE_PREFIXES + (
+    "july ",
+    "august ",
+    "september ",
+    "copyright",
+    "©",
+)
+
+TRUNCATED_TITLE_ENDINGS = {
+    "a",
+    "and",
+    "as",
+    "at",
+    "for",
+    "from",
+    "in",
+    "into",
+    "knowledge",
+    "language",
+    "large",
+    "of",
+    "on",
+    "plain",
+    "the",
+    "to",
+    "using",
+    "via",
+    "with",
+}
+
+TITLE_TERMS = {
+    "analysis",
+    "approach",
+    "augmented",
+    "benchmark",
+    "data",
+    "efficient",
+    "framework",
+    "generation",
+    "graph",
+    "graphs",
+    "knowledge",
+    "language",
+    "learning",
+    "llm",
+    "model",
+    "models",
+    "neural",
+    "rag",
+    "reasoning",
+    "retrieval",
+    "system",
+    "systems",
+}
+
+
+def canonical_paper_title(paper: dict) -> str:
+    """Return a runtime-corrected title without mutating paper_index.json."""
+    raw_title = _clean_title(str(paper.get("title") or ""))
+    focused_title = _title_from_focused_text(str(paper.get("focused_text") or ""))
+    filename_title = _title_from_filename(str(paper.get("pdf_path") or ""))
+
+    if _title_needs_replacement(raw_title):
+        return focused_title or filename_title or raw_title
+    if focused_title and _focused_title_extends_raw(raw_title, focused_title):
+        return focused_title
+    return raw_title or focused_title or filename_title
+
+
+def _clean_title(title: str) -> str:
+    title = title.replace("\u00ad", "")
+    title = re.sub(r"\s+", " ", title).strip(" -_\t\r\n")
+    return title
+
+
+def _title_needs_replacement(title: str) -> bool:
+    if len(re.findall(r"[a-zA-Z]", title)) < 4:
+        return True
+    title_lower = title.lower().strip()
+    if title_lower.startswith(BAD_TITLE_PREFIXES):
+        return True
+    if Path(title).name.startswith("._"):
+        return True
+    last_word = re.sub(r"[^a-z0-9]+", "", title_lower.split()[-1]) if title_lower.split() else ""
+    return last_word in TRUNCATED_TITLE_ENDINGS
+
+
+def _focused_title_extends_raw(raw_title: str, focused_title: str) -> bool:
+    raw_norm = _normalize_title_for_compare(raw_title)
+    focused_norm = _normalize_title_for_compare(focused_title)
+    if not raw_norm or not focused_norm:
+        return False
+    return focused_norm.startswith(raw_norm) and len(focused_norm) >= len(raw_norm) + 8
+
+
+def _normalize_title_for_compare(title: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()
+
+
+def _title_from_focused_text(text: str) -> str:
+    lines = []
+    for raw_line in text.splitlines()[:120]:
+        line = _clean_title(raw_line)
+        if not line:
+            continue
+        if _is_numeric_line(line) or _is_title_skip_line(line):
+            continue
+        if line.lower() in TITLE_STOPWORDS:
+            break
+        if lines and _looks_like_author_or_affiliation_line(line):
+            break
+        if _looks_like_title_line(line):
+            lines.append(line)
+            if len(lines) >= 4:
+                break
+            continue
+        if lines:
+            break
+    title = _join_title_lines(lines)
+    if _title_needs_replacement(title):
+        return ""
+    return title
+
+
+def _is_numeric_line(line: str) -> bool:
+    return bool(re.fullmatch(r"\d{1,4}", line.strip()))
+
+
+def _is_title_skip_line(line: str) -> bool:
+    lowered = line.lower()
+    if lowered.startswith(TITLE_SKIP_PREFIXES):
+        return True
+    if "conference on neural information processing systems" in lowered:
+        return True
+    if "association for computational linguistics" in lowered:
+        return True
+    return False
+
+
+def _looks_like_title_line(line: str) -> bool:
+    lowered = line.lower()
+    if len(re.findall(r"[a-zA-Z]", line)) < 4:
+        return False
+    if "@" in line or lowered.startswith(("http://", "https://", "www.")):
+        return False
+    if lowered in TITLE_STOPWORDS or _is_title_skip_line(line):
+        return False
+    if _looks_like_author_or_affiliation_line(line):
+        return False
+    return True
+
+
+def _looks_like_author_or_affiliation_line(line: str) -> bool:
+    lowered = line.lower()
+    if "@" in line:
+        return True
+    affiliation_pattern = (
+        r"\b(university|institute|department|laboratory|college|center|centre|"
+        r"technologies|inc|ltd|china|singapore|switzerland)\b|school of|hong kong"
+    )
+    if re.search(affiliation_pattern, lowered):
+        return True
+    if re.search(r"\d|[*†‡♢]", line):
+        tokens = re.findall(r"[A-Za-z][A-Za-z'.-]+", line)
+        title_terms = {token.lower().strip(".") for token in tokens} & TITLE_TERMS
+        return not title_terms
+    tokens = re.findall(r"[A-Za-z][A-Za-z'.-]+", line)
+    if 2 <= len(tokens) <= 5:
+        title_terms = {token.lower().strip(".") for token in tokens} & TITLE_TERMS
+        capitalized = sum(1 for token in tokens if token[:1].isupper())
+        if capitalized == len(tokens) and not title_terms and ":" not in line:
+            return True
+    return False
+
+
+def _join_title_lines(lines: list[str]) -> str:
+    title = ""
+    for line in lines:
+        if not title:
+            title = line
+        elif title.endswith("-"):
+            title = title[:-1] + line
+        elif _continues_uppercase_word(title, line):
+            title += line
+        else:
+            title += " " + line
+    return _clean_title(title)
+
+
+def _continues_uppercase_word(title: str, line: str) -> bool:
+    previous = re.search(r"([A-Z]{2,5})$", title)
+    return bool(previous and re.fullmatch(r"[A-Z]{4,}", line))
+
+
+def _title_from_filename(path: str) -> str:
+    if not path:
+        return ""
+    stem = Path(path).stem
+    if stem.startswith("._"):
+        stem = stem[2:]
+    if re.fullmatch(r"\d{4}\.[A-Za-z-]+\.\d+", stem):
+        return ""
+    stem = re.sub(r"^\d+_", "", stem)
+    stem = re.sub(r"^\d{4}\.[A-Za-z-]+\.\d+_", "", stem)
+    title = stem.replace("_", " ")
+    title = re.sub(r"\s+", " ", title).strip()
+    if _title_needs_replacement(title):
+        return ""
+    return title
+
+
 class LocalPaperIndex:
     """基于 embedding 的本地论文索引。"""
 
@@ -442,7 +666,7 @@ class LocalPaperIndex:
         }
 
     def _topic_rejection_reason(self, query: str, paper: dict) -> str:
-        title = str(paper.get("title") or "").strip()
+        title = canonical_paper_title(paper)
         title_lower = title.lower()
         if len(re.findall(r"[a-zA-Z]", title)) < 4:
             return "non-informative paper title metadata"
@@ -590,9 +814,10 @@ class LocalPaperIndex:
         relevance_label: str = "unscored",
         rejection_reason: str = "",
     ) -> SourceCandidate:
+        title = canonical_paper_title(paper)
         return SourceCandidate(
             url=paper.get("pdf_path", ""),
-            title=paper.get("title", ""),
+            title=title,
             snippet=paper.get("abstract", "")[:300],
             content=paper.get("focused_text", ""),
             source_type="academic_paper",
@@ -608,13 +833,13 @@ class LocalPaperIndex:
         )
 
     def _reranker_text(self, paper: dict) -> str:
-        title = str(paper.get("title") or "")
+        title = canonical_paper_title(paper)
         abstract = str(paper.get("abstract") or "")
         focused = str(paper.get("focused_text") or "")[:1800]
         return "\n".join(part for part in (title, abstract, focused) if part.strip())
 
     def _primary_text(self, paper: dict) -> str:
-        title = str(paper.get("title") or "")
+        title = canonical_paper_title(paper)
         abstract = str(paper.get("abstract") or "")
         return "\n".join(part for part in (title, abstract) if part.strip())
 
@@ -623,7 +848,7 @@ class LocalPaperIndex:
             return self._lexical_cache
         cache: list[dict[str, object]] = []
         for paper in self.searchable_papers:
-            title = paper.get("title", "").lower()
+            title = canonical_paper_title(paper).lower()
             abstract = paper.get("abstract", "").lower()
             focused = paper.get("focused_text", "").lower()[:3000]
             text = f"{title} {abstract} {focused}"
