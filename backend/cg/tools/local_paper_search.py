@@ -462,29 +462,41 @@ class LocalPaperIndex:
             self._reranker_error = f"{type(exc).__name__}: {exc}"
             return None
 
-    def search(self, query: str, max_results: int = 10) -> list[SourceCandidate]:
+    def search(
+        self,
+        query: str,
+        max_results: int = 10,
+        target_topic: str | None = None,
+    ) -> list[SourceCandidate]:
         """基于 embedding cosine similarity 检索，并用 lexical relevance 重排。"""
         if not self.searchable_papers:
             return []
 
         if self.embeddings is not None and len(self.embeddings) > 0:
-            return self._embedding_search(query, max_results)
+            return self._embedding_search(query, max_results, target_topic=target_topic)
 
         # fallback: 简单文本匹配
-        return self._text_search(query, max_results)
+        return self._text_search(query, max_results, target_topic=target_topic)
 
-    def _embedding_search(self, query: str, max_results: int) -> list[SourceCandidate]:
+    def _embedding_search(
+        self,
+        query: str,
+        max_results: int,
+        *,
+        target_topic: str | None = None,
+    ) -> list[SourceCandidate]:
         embedding_count = min(len(self.embeddings), len(self.searchable_papers))  # type: ignore[arg-type]
         papers = self.searchable_papers[:embedding_count]
         embeddings = self.embeddings[:embedding_count]  # type: ignore[index]
-        terms = query_terms(query)
+        ranking_query = self._query_with_topic(query, target_topic)
+        terms = query_terms(ranking_query)
         phrases = query_phrases(terms)
         lexical_scores = np.asarray(
             [self._lexical_score_for_index(terms, phrases, idx) for idx in range(embedding_count)],
             dtype=np.float32,
         )
 
-        query_emb = self._encode_query(query)
+        query_emb = self._encode_query(ranking_query)
         if query_emb is None:
             query_emb = self._pseudo_query_embedding(lexical_scores, embeddings)
 
@@ -512,7 +524,13 @@ class LocalPaperIndex:
             if len(on_topic) >= min(max_results, 3):
                 ranked = on_topic
 
-        ranked = self._rerank_ranked(query, ranked, papers, max_results)
+        ranked = self._rerank_ranked(
+            query,
+            ranked,
+            papers,
+            max_results,
+            target_topic=target_topic,
+        )
 
         results = []
         accepted_count = 0
@@ -565,6 +583,8 @@ class LocalPaperIndex:
         ranked: list[tuple[float, float, float, int]],
         papers: list[dict],
         max_results: int,
+        *,
+        target_topic: str | None = None,
     ) -> list[tuple[object, float, float, int]]:
         if not ranked:
             return []
@@ -573,7 +593,8 @@ class LocalPaperIndex:
             max(max_results * 4, self.settings.scholar_reranker_pool_size),
         )
         pool = ranked[:pool_size]
-        reranker_scores = self._rerank_scores(query, [papers[idx] for *_scores, idx in pool])
+        ranking_query = self._query_with_topic(query, target_topic)
+        reranker_scores = self._rerank_scores(ranking_query, [papers[idx] for *_scores, idx in pool])
         rescored: list[tuple[object, float, float, int]] = []
         for position, (combined_score, embedding_score, lexical_score, idx) in enumerate(pool):
             reranker_score = reranker_scores[position] if reranker_scores is not None else None
@@ -583,7 +604,11 @@ class LocalPaperIndex:
                 combined_score=combined_score,
                 reranker_score=reranker_score,
             )
-            topic_rejection = self._topic_rejection_reason(query, papers[idx])
+            topic_rejection = self._topic_rejection_reason(
+                query,
+                papers[idx],
+                target_topic=target_topic,
+            )
             if topic_rejection:
                 relevance = {
                     "score": 0.0,
@@ -665,7 +690,13 @@ class LocalPaperIndex:
             "reranker_score": reranker_score,
         }
 
-    def _topic_rejection_reason(self, query: str, paper: dict) -> str:
+    def _topic_rejection_reason(
+        self,
+        query: str,
+        paper: dict,
+        *,
+        target_topic: str | None = None,
+    ) -> str:
         title = canonical_paper_title(paper)
         title_lower = title.lower()
         if len(re.findall(r"[a-zA-Z]", title)) < 4:
@@ -677,7 +708,8 @@ class LocalPaperIndex:
         )):
             return "conference proceedings page rather than a paper title"
 
-        terms = set(query_terms(query))
+        gate_query = self._query_with_topic(query, target_topic)
+        terms = set(query_terms(gate_query))
         primary = self._primary_text(paper).lower()
         primary_terms = {normalize_term(term) for term in re.findall(r"[a-z0-9]{2,}", primary)}
         primary_has_kg = self._has_kg_signal(primary, primary_terms)
@@ -691,7 +723,7 @@ class LocalPaperIndex:
             or {"retrieval", "augmented", "generation"}.issubset(terms)
         )
         dynamic_query_terms = {"dynamic", "temporal", "update", "continual", "evolving", "event", "stream"}
-        query_lower = query.lower()
+        query_lower = gate_query.lower()
         query_needs_dynamic_kg = query_needs_kg and (
             bool(terms & dynamic_query_terms)
             or "time-evolving" in query_lower
@@ -785,9 +817,15 @@ class LocalPaperIndex:
             return 0.10
         return 0.06
 
-    def _text_search(self, query: str, max_results: int) -> list[SourceCandidate]:
+    def _text_search(
+        self,
+        query: str,
+        max_results: int,
+        *,
+        target_topic: str | None = None,
+    ) -> list[SourceCandidate]:
         """Fallback: 基于文本匹配的检索。"""
-        terms = query_terms(query)
+        terms = query_terms(self._query_with_topic(query, target_topic))
         phrases = query_phrases(terms)
         scored = []
         for idx, paper in enumerate(self.searchable_papers):
@@ -800,6 +838,14 @@ class LocalPaperIndex:
             if score > 0:
                 results.append(self._candidate_from_paper(paper, query, score))
         return results
+
+    def _query_with_topic(self, query: str, target_topic: str | None) -> str:
+        topic = (target_topic or "").strip()
+        if not topic:
+            return query
+        if topic.lower() in query.lower():
+            return query
+        return f"{topic} {query}"
 
     def _candidate_from_paper(
         self,
@@ -995,3 +1041,11 @@ class LocalPaperSearchTool:
 
     async def search(self, query: str, max_results: int = 10) -> list[SourceCandidate]:
         return self.index.search(query, max_results)
+
+    async def search_for_topic(
+        self,
+        query: str,
+        target_topic: str,
+        max_results: int = 10,
+    ) -> list[SourceCandidate]:
+        return self.index.search(query, max_results, target_topic=target_topic)

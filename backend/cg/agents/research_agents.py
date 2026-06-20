@@ -393,6 +393,7 @@ class SourceResearchAgent(BaseAgent):
                     f"outer_{loop_round}_search_{round_num}",
                     round_num,
                     loop_round,
+                    request.target_topic,
                 )
 
                 # ── Observe 阶段：判断结果是否带来新信息 ──
@@ -817,6 +818,7 @@ class SourceResearchAgent(BaseAgent):
         search_round: str,
         round_num: int = 1,
         loop_round: int = 1,
+        target_topic: str = "",
     ) -> list[SourceCandidate]:
         await self.record_llm_event(
             "progress", "tool_call",
@@ -838,6 +840,13 @@ class SourceResearchAgent(BaseAgent):
         try:
             if hasattr(search, "search_content_providers"):
                 provider_batches = await search.search_content_providers(task.query, max_results_per_provider=max_results)
+            elif hasattr(search, "search_for_topic"):
+                topic_results = await search.search_for_topic(
+                    task.query,
+                    target_topic,
+                    max_results=max_results,
+                )
+                provider_batches = {"local_papers": topic_results}
             else:
                 legacy_results = await search.search(task.query, max_results=max_results)
                 provider_batches = {"search": legacy_results}

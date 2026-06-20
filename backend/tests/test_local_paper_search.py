@@ -105,3 +105,105 @@ def test_rag_kg_gate_still_rejects_kg_construction_without_title_rag_signal() ->
         _index()._topic_rejection_reason("RAG with Knowledge Graphs", paper)
         == "RAG+KG query requires title-level RAG and graph signal"
     )
+
+
+def test_rag_kg_target_gate_rejects_query_drift_graph_sampling() -> None:
+    paper = {
+        "title": "Efficient Streaming Algorithms for Graphlet Sampling",
+        "abstract": (
+            "This paper studies streaming algorithms for estimating graphlets in "
+            "large graphs with approximation guarantees."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/graphlet_sampling.pdf",
+    }
+
+    reason = _index()._topic_rejection_reason(
+        "subgraph sampling and approximation algorithms for efficient KG retrieval",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert reason == "RAG+KG query requires title-level RAG and graph signal"
+
+
+def test_rag_kg_target_gate_rejects_generic_kg_completion() -> None:
+    paper = {
+        "title": "Replacing Paths with Connection-Biased Attention for Knowledge Graph Completion",
+        "abstract": (
+            "Knowledge graph completion predicts missing relations in sparse "
+            "knowledge graphs using path-aware attention."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/kg_completion.pdf",
+    }
+
+    reason = _index()._topic_rejection_reason(
+        "relation-aware anchor retrieval over sparse knowledge graphs",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert reason == "RAG+KG query requires title-level RAG and graph signal"
+
+
+def test_rag_kg_target_gate_rejects_molecule_gnn() -> None:
+    paper = {
+        "title": "Pre-Training Graph Neural Networks on Molecules with Context Prediction",
+        "abstract": (
+            "We pre-train graph neural networks on molecular graphs for downstream "
+            "property prediction tasks."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/molecule_gnn.pdf",
+    }
+
+    reason = _index()._topic_rejection_reason(
+        "graph neural retrieval and subgraph representation learning",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert reason == "RAG+KG query requires title-level RAG and graph signal"
+
+
+def test_rag_kg_target_gate_accepts_graphrag_paper_under_drift_query() -> None:
+    paper = {
+        "title": "HyperGraphRAG: Retrieval-Augmented Generation with Hypergraph-Structured Knowledge",
+        "abstract": (
+            "HyperGraphRAG augments large language models with knowledge graphs "
+            "and graph retrieval-augmented generation over hypergraph structure."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/hypergraphrag.pdf",
+    }
+
+    assert (
+        _index()._topic_rejection_reason(
+            "subgraph sampling and approximation algorithms for efficient KG retrieval",
+            paper,
+            target_topic="RAG with Knowledge Graphs",
+        )
+        == ""
+    )
+
+
+def test_rag_kg_target_gate_accepts_frag_paper_under_drift_query() -> None:
+    paper = {
+        "title": "FRAG: A Flexible Modular Framework for Retrieval-Augmented Generation based on Knowledge Graphs",
+        "abstract": (
+            "Knowledge Graph based Retrieval-Augmented Generation uses KGs as "
+            "external resources to enhance LLM reasoning."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/frag.pdf",
+    }
+
+    assert (
+        _index()._topic_rejection_reason(
+            "modular pipeline composition and inference-time control",
+            paper,
+            target_topic="RAG with Knowledge Graphs",
+        )
+        == ""
+    )
