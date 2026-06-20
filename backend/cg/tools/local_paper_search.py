@@ -829,6 +829,10 @@ class LocalPaperIndex:
     ) -> SourceSubtype:
         gate_query = self._query_with_topic(query, target_topic)
         family = self._topic_family(gate_query)
+        if family == "scientific_reasoning_llm":
+            return self._scientific_reasoning_llm_subtype(paper)
+        if family == "mathematical_reasoning":
+            return self._mathematical_reasoning_subtype(paper)
         if family == "causal_reasoning_llm":
             return self._causal_reasoning_llm_subtype(paper)
         if family == "counterfactual_inference":
@@ -1002,6 +1006,23 @@ class LocalPaperIndex:
         )
         if "counterfactual inference" in lower:
             return "counterfactual_inference"
+        if "scientific reasoning" in lower or (
+            has_llm and ("scientific" in terms or "science" in terms)
+        ):
+            return "scientific_reasoning_llm"
+        if (
+            "mathematical reasoning" in lower
+            or "math reasoning" in lower
+            or (
+                has_llm
+                and (
+                    "mathematics" in terms
+                    or "mathematical" in terms
+                    or "math" in terms
+                )
+            )
+        ):
+            return "mathematical_reasoning"
         if has_llm and ("causal reasoning" in lower or {"causal", "reasoning"}.issubset(terms)):
             return "causal_reasoning_llm"
         if {"counterfactual", "inference"}.issubset(terms):
@@ -1019,6 +1040,273 @@ class LocalPaperIndex:
         focused = str(paper.get("focused_text") or "")[:1800]
         primary = f"{title}\n{abstract}\n{focused}"
         return compact_topic_text(title), compact_topic_text(primary)
+
+    def _scientific_reasoning_llm_subtype(self, paper: dict) -> SourceSubtype:
+        title, primary = self._paper_primary_compact(paper)
+        title_terms = re.findall(r"[a-z]{3,}", title)
+        title_has_science = any(
+            marker in title
+            for marker in (
+                "scientific",
+                "science",
+                "equation",
+                "symbolic regression",
+                "hypothesis",
+                "discovery",
+                "experiment",
+                "single-cell",
+                "single cell",
+                "catalyst",
+                "chem",
+                "physics",
+                "condensed matter",
+                "material",
+                "materials",
+                "molecular",
+                "researcher",
+            )
+        )
+        if len(title_terms) <= 3 and not title_has_science:
+            return SourceSubtype(
+                "scientific_reasoning_adjacent",
+                "paper title metadata is too weak for topic-specific scientific reasoning screening",
+                "non-informative paper title metadata",
+            )
+        has_llm = any(
+            marker in primary
+            for marker in (
+                "large language model",
+                "large language models",
+                "language model",
+                "language models",
+                "llm",
+                "llms",
+                "agent",
+                "agents",
+            )
+        )
+        has_science = any(
+            marker in primary
+            for marker in (
+                "scientific",
+                "science",
+                "scientific reasoning",
+                "scientific discovery",
+                "hypothesis",
+                "experiment planning",
+                "equation discovery",
+                "symbolic regression",
+                "single-cell",
+                "single cell",
+                "catalyst",
+                "physics",
+                "condensed matter",
+                "chemistry",
+                "chemical",
+                "material",
+                "materials",
+                "molecular",
+                "biology",
+                "biomedical",
+                "researcher",
+                "literature",
+            )
+        )
+        if not has_llm or not has_science:
+            return SourceSubtype(
+                "scientific_reasoning_adjacent",
+                "paper lacks explicit LLM scientific reasoning, discovery, or benchmark signal",
+                "Scientific reasoning with LLMs query requires LLM plus scientific reasoning/discovery signal",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "equation discovery",
+                "symbolic regression",
+                "scientific equation",
+                "llm-srbench",
+            )
+        ):
+            return SourceSubtype(
+                "scientific_equation_discovery",
+                "paper studies scientific equation discovery or symbolic-regression reasoning with LLMs",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "scientific discovery",
+                "autonomous scientific",
+                "ai-researcher",
+                "ai researcher",
+                "discovery powered by llm agents",
+                "hypothesis generation",
+                "experiment planning",
+                "literature-based discovery",
+                "literature based discovery",
+            )
+        ):
+            return SourceSubtype(
+                "scientific_discovery_agent",
+                "paper studies LLM agents or workflows for scientific discovery and hypothesis generation",
+            )
+        if "benchmark" in primary or "dataset" in primary or "evaluation" in primary:
+            return SourceSubtype(
+                "scientific_reasoning_benchmark",
+                "paper benchmarks or evaluates LLM scientific reasoning behavior",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "single-cell",
+                "single cell",
+                "catalyst",
+                "physics",
+                "condensed matter",
+                "chemistry",
+                "chemical",
+                "material",
+                "materials",
+                "molecular",
+                "biology",
+                "biomedical",
+                "quantum-chemical",
+                "quantum chemical",
+            )
+        ):
+            return SourceSubtype(
+                "domain_science_reasoning",
+                "paper applies or evaluates LLM reasoning in a concrete scientific domain",
+            )
+        return SourceSubtype(
+            "core_scientific_reasoning_method",
+            "paper directly studies methods for scientific reasoning with LLMs",
+        )
+
+    def _mathematical_reasoning_subtype(self, paper: dict) -> SourceSubtype:
+        title, primary = self._paper_primary_compact(paper)
+        title_terms = re.findall(r"[a-z]{3,}", title)
+        title_has_math = any(
+            marker in title
+            for marker in (
+                "mathematical",
+                "mathematics",
+                "math",
+                "word problem",
+                "theorem",
+                "proof",
+                "formal",
+                "olympiad",
+                "gsm8k",
+                "lean",
+                "geometry",
+                "algebra",
+            )
+        )
+        if len(title_terms) <= 3 and not title_has_math:
+            return SourceSubtype(
+                "mathematical_reasoning_adjacent",
+                "paper title metadata is too weak for topic-specific mathematical reasoning screening",
+                "non-informative paper title metadata",
+            )
+        has_llm = any(
+            marker in primary
+            for marker in (
+                "large language model",
+                "large language models",
+                "language model",
+                "language models",
+                "llm",
+                "llms",
+                "lrm",
+                "lrms",
+            )
+        )
+        has_math = any(
+            marker in primary
+            for marker in (
+                "mathematical",
+                "mathematics",
+                "math",
+                "word problem",
+                "word problems",
+                "theorem",
+                "proof",
+                "formal verification",
+                "olympiad",
+                "gsm8k",
+                "mmlu",
+                "lean",
+                "geometry",
+                "algebra",
+            )
+        )
+        if not has_llm or not has_math:
+            return SourceSubtype(
+                "mathematical_reasoning_adjacent",
+                "paper lacks explicit LLM mathematical reasoning signal",
+                "Mathematical reasoning query requires LLM plus mathematical reasoning/proof signal",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "theorem proving",
+                "formal proof",
+                "formal verification",
+                "proof generation",
+                "proof assistant",
+                "lean",
+                "coq",
+                "isabelle",
+            )
+        ):
+            return SourceSubtype(
+                "formal_math_proving",
+                "paper studies formal mathematical proof generation or verification with language models",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "instruction tuning",
+                "synthetic data",
+                "data synthesis",
+                "scaling",
+                "bootstrap",
+                "metamath",
+                "mathscale",
+                "llemma",
+            )
+        ):
+            return SourceSubtype(
+                "math_training_data",
+                "paper studies data, scaling, or tuning for mathematical reasoning in language models",
+            )
+        if "benchmark" in primary or "dataset" in primary or "gsm8k" in primary or "olympiad" in primary:
+            return SourceSubtype(
+                "math_reasoning_benchmark",
+                "paper benchmarks LLM mathematical reasoning or problem solving",
+            )
+        if any(
+            marker in primary
+            for marker in (
+                "chain-of-thought",
+                "chain of thought",
+                "step-aware",
+                "step aware",
+                "verification",
+                "counterexample",
+                "graph-guided",
+                "graph guided",
+                "prompt",
+            )
+        ):
+            return SourceSubtype(
+                "math_reasoning_method",
+                "paper studies prompting, verification, or reasoning mechanisms for LLM mathematics",
+            )
+        return SourceSubtype(
+            "core_mathematical_reasoning",
+            "paper directly studies mathematical reasoning with language models",
+        )
 
     def _causal_reasoning_llm_subtype(self, paper: dict) -> SourceSubtype:
         title, primary = self._paper_primary_compact(paper)

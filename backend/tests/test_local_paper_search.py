@@ -316,6 +316,149 @@ def test_rag_kg_subtype_separates_kgqa_graph_reasoning() -> None:
     assert subtype.rejection_reason == ""
 
 
+def test_scientific_reasoning_gate_classifies_equation_discovery_benchmark() -> None:
+    paper = {
+        "title": "LLM-SRBench: A New Benchmark for Scientific Equation Discovery with Large Language Models",
+        "abstract": (
+            "The benchmark evaluates large language models on scientific equation "
+            "discovery and symbolic regression tasks."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/llm_srbench.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Scientific Reasoning with LLMs benchmark hypothesis generation",
+        paper,
+        target_topic="Scientific Reasoning with LLMs",
+    )
+
+    assert subtype.label == "scientific_equation_discovery"
+    assert subtype.rejection_reason == ""
+
+
+def test_scientific_reasoning_gate_classifies_discovery_agents() -> None:
+    paper = {
+        "title": "AI-Researcher: Autonomous Scientific Innovation",
+        "abstract": (
+            "Large language model agents perform literature-based discovery, "
+            "hypothesis generation, and experiment planning."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/ai_researcher.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Scientific Reasoning with LLMs autonomous discovery",
+        paper,
+        target_topic="Scientific Reasoning with LLMs",
+    )
+
+    assert subtype.label == "scientific_discovery_agent"
+    assert subtype.rejection_reason == ""
+
+
+def test_scientific_reasoning_gate_keeps_physics_benchmark() -> None:
+    paper = {
+        "title": "CMPhysBench: A Benchmark for Evaluating Large Language Models in Condensed Matter Physics",
+        "abstract": (
+            "The benchmark evaluates large language models on physics reasoning "
+            "and materials science questions."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/cmphysbench.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Scientific Reasoning with LLMs benchmark hypothesis generation",
+        paper,
+        target_topic="Scientific Reasoning with LLMs",
+    )
+
+    assert subtype.label == "scientific_reasoning_benchmark"
+    assert subtype.rejection_reason == ""
+
+
+def test_scientific_reasoning_gate_rejects_generic_llm_paper() -> None:
+    paper = {
+        "title": "Large Language Models",
+        "abstract": "A broad overview of language model pretraining and scaling.",
+        "focused_text": "",
+        "pdf_path": "/papers/generic_llm.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Scientific Reasoning with LLMs benchmark hypothesis generation",
+        paper,
+        target_topic="Scientific Reasoning with LLMs",
+    )
+
+    assert subtype.label == "scientific_reasoning_adjacent"
+    assert subtype.rejection_reason == "non-informative paper title metadata"
+
+
+def test_mathematical_reasoning_gate_classifies_training_data_scaling() -> None:
+    paper = {
+        "title": "MathScale: Scaling Instruction Tuning for Mathematical Reasoning",
+        "abstract": (
+            "The paper studies instruction tuning, data synthesis, and scaling for "
+            "large language models on mathematical reasoning tasks."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/mathscale.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Mathematical Reasoning large language models benchmark",
+        paper,
+        target_topic="Mathematical Reasoning",
+    )
+
+    assert subtype.label == "math_training_data"
+    assert subtype.rejection_reason == ""
+
+
+def test_mathematical_reasoning_gate_classifies_formal_proving() -> None:
+    paper = {
+        "title": "Formal Mathematical Proof Generation with Large Language Models",
+        "abstract": (
+            "The method uses language models with Lean proof assistants for theorem "
+            "proving and formal verification."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/formal_math_proof.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Mathematical Reasoning theorem proving",
+        paper,
+        target_topic="Mathematical Reasoning",
+    )
+
+    assert subtype.label == "formal_math_proving"
+    assert subtype.rejection_reason == ""
+
+
+def test_mathematical_reasoning_gate_rejects_generic_reasoning_paper() -> None:
+    paper = {
+        "title": "Reasoning over Long Contexts with Language Models",
+        "abstract": "The paper evaluates language models on long-context retrieval tasks.",
+        "focused_text": "",
+        "pdf_path": "/papers/generic_reasoning.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Mathematical Reasoning large language models benchmark",
+        paper,
+        target_topic="Mathematical Reasoning",
+    )
+
+    assert subtype.label == "mathematical_reasoning_adjacent"
+    assert subtype.rejection_reason == (
+        "Mathematical reasoning query requires LLM plus mathematical reasoning/proof signal"
+    )
+
+
 def test_causal_reasoning_llm_gate_rejects_autoregressive_causal_inference() -> None:
     paper = {
         "title": "KV-Runahead: Scalable Causal LLM Inference by Parallel Key-Value Cache Generation",
