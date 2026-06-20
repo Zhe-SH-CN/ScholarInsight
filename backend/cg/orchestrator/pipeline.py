@@ -1896,8 +1896,9 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
         paper_facts = cluster_paper_facts(supporting)
         source_role_label = SOURCE_ROLE_LABELS.get(source_role, source_role.replace("_", " "))
         claim_text = (
-            f"{source_role_label} 方向在{cluster.dimension_label}维度形成一个共同模式："
-            f"{paper_facts}"
+            f"作为跨论文对比性观察，{source_role_label} 来源在{cluster.dimension_label}维度"
+            f"呈现出若干互补切入点：{paper_facts}。"
+            "这只说明当前样本内的机制差异，不单独构成领域趋势。"
         )
         reasoning = (
             f"该 synthesis 只合并同一 source role（{source_role_label}）内的证据，"

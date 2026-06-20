@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from cg.agents.research_agents import deterministic_plan, normalize_dimension_key
+from cg.agents.research_agents import deterministic_plan, normalize_claim_dimension, normalize_dimension_key
 from cg.schemas.research import ResearchRequest, TOPIC_FAMILY_DIMENSIONS, dimensions_for_topic
 
 
@@ -74,4 +74,40 @@ def test_normalize_counterfactual_dimension_aliases() -> None:
             "identifiability assumptions sensitivity analysis",
         )
         == "identifiability_assumption_sensitivity"
+    )
+
+
+def test_normalize_claim_dimension_rejects_meta_claims_across_dimensions() -> None:
+    valid = {
+        "treatment_effect_estimation",
+        "core_counterfactual_inference",
+        "counterfactual_explanation_fairness",
+    }
+
+    assert (
+        normalize_claim_dimension(
+            "counterfactual_explanation_and_fairness",
+            "counterfactual fairness and recourse",
+            ["counterfactual_explanation_fairness"],
+            valid,
+        )
+        == "counterfactual_explanation_fairness"
+    )
+    assert (
+        normalize_claim_dimension(
+            "research_distribution",
+            "evidence distribution across research areas",
+            ["treatment_effect_estimation", "core_counterfactual_inference"],
+            valid,
+        )
+        == ""
+    )
+    assert (
+        normalize_claim_dimension(
+            "unclear_dimension",
+            "single-dimension observation",
+            ["treatment_effect_estimation", "treatment_effect_estimation"],
+            valid,
+        )
+        == "treatment_effect_estimation"
     )

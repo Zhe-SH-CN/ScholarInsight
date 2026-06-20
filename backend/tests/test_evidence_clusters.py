@@ -77,6 +77,8 @@ def test_cluster_claims_synthesize_only_same_source_role() -> None:
     claim = synthesis_claims[0]
     assert claim.source_paper_count == 2
     assert "KGQA/graph reasoning" in claim.claim
+    assert "跨论文对比性观察" in claim.claim
+    assert "共同模式" not in claim.claim
     assert "提供了相近证据" not in claim.claim
     assert set(claim.supporting_evidence_ids) == {"ev_a1", "ev_b1"}
     assert claim.supporting_source_subtypes == ["kgqa_or_graph_reasoning"]

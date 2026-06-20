@@ -1240,12 +1240,15 @@ class AnalysisAndReviewAgent(BaseAgent):
             # 推断 claim 类型（不依赖 LLM 输出）
             supporting_papers = set()
             supporting_source_subtypes = []
+            supporting_dimensions = []
             for ev_id in supporting:
                 ev = evidence_by_id.get(ev_id)
                 if ev and ev.paper:
                     supporting_papers.add(ev.paper)
                 if ev and ev.source_subtype:
                     supporting_source_subtypes.append(ev.source_subtype)
+                if ev and ev.dimension:
+                    supporting_dimensions.append(ev.dimension)
             source_subtype_counts = dict(sorted(Counter(supporting_source_subtypes).items()))
 
             # 自动推断 claim_type
@@ -1260,7 +1263,14 @@ class AnalysisAndReviewAgent(BaseAgent):
             if len(claim_text) < 12:
                 continue
             reasoning_summary = str(row.get("reasoning_summary") or "由 LLM 基于 Evidence 聚合生成。")
-            dimension = normalize_dimension_key(row.get("dimension"), f"{claim_text} {reasoning_summary}")
+            dimension = normalize_claim_dimension(
+                row.get("dimension"),
+                f"{claim_text} {reasoning_summary}",
+                supporting_dimensions,
+                set(by_dim),
+            )
+            if not dimension:
+                continue
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
             if claim_type == "backlog":
                 confidence = min(confidence, 0.55)
@@ -2925,6 +2935,23 @@ def normalize_dimension_key(value: Any, context: str = "") -> str:
     if best_hint_match:
         return best_hint_match[1]
     return "other"
+
+
+def normalize_claim_dimension(
+    value: Any,
+    context: str,
+    supporting_dimensions: list[str],
+    valid_dimensions: set[str],
+) -> str:
+    dimension = normalize_dimension_key(value, context)
+    if dimension in valid_dimensions:
+        return dimension
+
+    counts = Counter(dim for dim in supporting_dimensions if dim in valid_dimensions)
+    if len(counts) == 1:
+        return next(iter(counts))
+
+    return ""
 
 
 def normalize_agent_flow(values: list[str]) -> list[str]:
