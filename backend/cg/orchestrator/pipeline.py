@@ -4107,7 +4107,7 @@ def build_analysis_report(
         for claim in audit_only_claims[:4]:
             cite = citations_for_ids(claim.supporting_evidence_ids, citation_numbers)
             reason = claim_report_ready_reason(claim)
-            wording = compact_fact(best_claim_text(claim), 240)
+            wording = audit_only_claim_display_text(claim)
             lines.append(f"- {wording}{cite}（暂不进入主结论：{reason or 'needs_review'}）")
         if not dimension_claims and has_citable_dimension_cells(dimension_cells):
             lines.extend(build_dimension_fallback_points(dimension_cells, citation_numbers))
@@ -4251,13 +4251,74 @@ def report_ready_representative_evidence(
             item for item in evidence
             if item.dimension == dimension and item.evidence_id in support_ids
         ],
-        key=lambda item: item.confidence,
+        key=lambda item: (report_evidence_snippet_score(item), item.confidence),
         reverse=True,
     )
 
 
+REPORT_SNIPPET_BAD_PREFIXES = {
+    "based",
+    "ilarity",
+    "lacker",
+    "nations",
+    "nism",
+    "ods",
+    "over",
+    "plex",
+    "ques",
+    "sive",
+    "tions",
+    "ural",
+    "velop",
+}
+REPORT_SNIPPET_ALLOWED_LOWER_STARTS = {
+    "a",
+    "an",
+    "as",
+    "can",
+    "has",
+    "have",
+    "in",
+    "into",
+    "is",
+    "it",
+    "its",
+    "may",
+    "our",
+    "the",
+    "their",
+    "there",
+    "these",
+    "this",
+    "through",
+    "to",
+    "using",
+    "was",
+    "we",
+    "when",
+    "while",
+    "with",
+}
+REPORT_SNIPPET_BAD_ENDINGS = {"en", "knowl", "ques", "rea", "sig", "struc"}
+
+
 def report_evidence_snippet(item: Evidence, max_len: int = 92) -> str:
-    text = item.quote or item.fact
+    for text in [item.quote, item.fact]:
+        cleaned = clean_report_evidence_text(item, text)
+        if cleaned and not is_low_quality_report_snippet(cleaned):
+            return compact_fact(cleaned, max_len)
+    return report_evidence_fallback_phrase(item, max_len)
+
+
+def report_evidence_snippet_score(item: Evidence) -> int:
+    for text in [item.quote, item.fact]:
+        cleaned = clean_report_evidence_text(item, text)
+        if cleaned and not is_low_quality_report_snippet(cleaned):
+            return 1
+    return 0
+
+
+def clean_report_evidence_text(item: Evidence, text: str) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
     cleaned = re.sub(
         r"^.+?在[^:：]{0,120}相关论文文本中出现了可核验表述[:：]\s*",
@@ -4265,10 +4326,61 @@ def report_evidence_snippet(item: Evidence, max_len: int = 92) -> str:
         cleaned,
     ).strip()
     paper = (item.paper or item.source_title or "").strip()
-    if paper and cleaned.startswith(paper):
-        cleaned = cleaned[len(paper):].lstrip(" :：-–—,.;，。")
-    cleaned = cleaned or item.fact or item.quote or "见 Evidence 附录"
-    return compact_fact(cleaned, max_len)
+    if paper:
+        paper_lower = paper.lower()
+        cleaned_lower = cleaned.lower()
+        if cleaned.startswith(paper):
+            cleaned = cleaned[len(paper):].lstrip(" :：-–—,.;，。")
+        elif len(cleaned) >= 24 and (paper_lower.startswith(cleaned_lower) or cleaned_lower.startswith(paper_lower)):
+            cleaned = ""
+    return cleaned
+
+
+def is_low_quality_report_snippet(text: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) < 24:
+        return True
+    if re.match(r"(?i)^(figure|table|algorithm)\s*\d+\b", cleaned):
+        return True
+    words = re.findall(r"[A-Za-z]+", cleaned)
+    if words:
+        first = words[0]
+        lower = first.lower()
+        if lower in REPORT_SNIPPET_BAD_PREFIXES:
+            return True
+        if first[:1].islower() and len(lower) <= 6 and lower not in REPORT_SNIPPET_ALLOWED_LOWER_STARTS:
+            return True
+        last = words[-1].lower()
+        if last in REPORT_SNIPPET_BAD_ENDINGS:
+            return True
+    return False
+
+
+def report_evidence_fallback_phrase(item: Evidence, max_len: int = 92) -> str:
+    if item.source_subtype in SYNTHESIS_SOURCE_ROLES:
+        axis = source_role_contribution_phrase(item.source_subtype, item.dimension_label)
+    else:
+        axis = item.mechanism or item.bottleneck or item.reasoning_pattern or item.dimension_label
+    return compact_fact(f"围绕{axis}提供可审计支撑，详见 Evidence 附录", max_len)
+
+
+def audit_only_claim_display_text(claim: Claim) -> str:
+    axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+    role_text = role_backing_phrase(claim)
+    support_text = role_text or (
+        f"{claim.source_paper_count} 篇独立论文"
+        if claim.source_paper_count > 1
+        else "单篇论文"
+    )
+    if claim.claim_type == "single_paper_observation" or claim.source_paper_count <= 1:
+        return (
+            f"单论文待验证观察：{claim.dimension_label} 上有关于“{axis}”的可审计线索，"
+            "需补充独立论文后再写入主体。"
+        )
+    return (
+        f"待验证综合观察：{claim.dimension_label} 的“{axis}”已有来自 {support_text} 的线索，"
+        "但当前不满足 report-ready 条件。"
+    )
 
 
 def has_citable_dimension_cells(cells: list[MatrixCell]) -> bool:

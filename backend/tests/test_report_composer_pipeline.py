@@ -399,6 +399,106 @@ def test_report_ready_representative_evidence_uses_clean_snippets() -> None:
     assert "相关论文文本中出现了可核验表述" not in body
 
 
+def test_report_ready_representative_evidence_filters_ocr_fragments() -> None:
+    request = ResearchRequest(
+        project_name="Representative OCR cleanup regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready("ev_ready_1", "Paper A").model_copy(
+            update={
+                "quote": "nism for efficient and flexible subgraph retrieval while encoding directional struc",
+                "fact": "nism for efficient and flexible subgraph retrieval while encoding directional struc",
+                "source_subtype": "core_counterfactual_inference",
+            }
+        ),
+        _evidence_for_report_ready("ev_ready_2", "Paper B").model_copy(
+            update={
+                "quote": "Figure 1: Retrieval effect on multi-hop/entity KGQA.",
+                "fact": "Figure 1: Retrieval effect on multi-hop/entity KGQA.",
+                "source_subtype": "core_counterfactual_inference",
+            }
+        ),
+        _evidence_for_report_ready("ev_ready_3", "Paper C").model_copy(
+            update={"quote": "The paper evaluates counterfactual identifiability assumptions."}
+        ),
+        _evidence_for_report_ready("ev_ready_4", "Paper D").model_copy(
+            update={"quote": "These protocols compare structural assumptions across settings."}
+        ),
+    ]
+    report = pipeline_module.build_analysis_report(
+        request,
+        evidence,
+        [_report_ready_claim()],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+    )
+
+    body = report.split("## Evidence 附录", 1)[0]
+    assert "代表性支撑证据" in body
+    assert "nism for efficient" not in body
+    assert "directional struc" not in body
+    assert "Figure 1:" not in body
+    assert "围绕结构因果假设、反事实查询和可识别性条件提供可审计支撑" in body
+
+
+def test_report_ready_representative_evidence_filters_title_fragments() -> None:
+    item = _evidence_for_report_ready("ev_ready_1", "Correcting on Graph: Faithful Semantic Parsing over Knowledge Graphs with Large Language Models").model_copy(
+        update={
+            "quote": "Correcting on Graph: Faithful Semantic Parsing over Knowledge Graphs",
+            "fact": "Correcting on Graph: Faithful Semantic Parsing over Knowledge Graphs",
+            "source_subtype": "kgqa_or_graph_reasoning",
+            "dimension_label": "KGQA/图推理",
+        }
+    )
+
+    snippet = pipeline_module.report_evidence_snippet(item)
+
+    assert "Correcting on Graph" not in snippet
+    assert "围绕KGQA、语义解析和可执行查询构造提供可审计支撑" in snippet
+
+
+def test_audit_only_claim_display_avoids_ocr_fragments() -> None:
+    request = ResearchRequest(
+        project_name="Audit-only OCR cleanup regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    claim = _sample_limited_claim().model_copy(
+        update={
+            "claim": (
+                "当前样本内，作为跨论文对比性观察，core counterfactual inference 来源在核心反事实推断维度"
+                "呈现出若干互补切入点：Paper A：nism for efficient mechanism；"
+                "Paper B：velop an optimized protocol；不单独构成领域趋势。"
+            ),
+            "evidence_cluster_label": "counterfactual identifiability and assumptions",
+        }
+    )
+    report = pipeline_module.build_analysis_report(
+        request,
+        [
+            _evidence_for_report_ready("ev_ready_1", "Paper A"),
+            _evidence_for_report_ready("ev_ready_2", "Paper B"),
+            _evidence_for_report_ready("ev_ready_3", "Paper C"),
+            _evidence_for_report_ready("ev_ready_4", "Paper D"),
+        ],
+        [claim],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+    )
+
+    body = report.split("## Evidence 附录", 1)[0]
+    assert "待验证综合观察" in body
+    assert "可识别性条件、结构因果假设、混杂处理或反事实查询约束" in body
+    assert "nism for efficient" not in body
+    assert "velop an optimized" not in body
+
+
 def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> None:
     request = ResearchRequest(
         project_name="Grounded recommendation regression",
