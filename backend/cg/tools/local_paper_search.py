@@ -450,7 +450,11 @@ class LocalPaperIndex:
         return self._reranker
 
     def _rerank_scores(self, query: str, papers: list[dict]) -> list[float] | None:
-        if not self.settings.scholar_enable_reranker or self._reranker_error:
+        if not self.settings.scholar_enable_reranker:
+            return None
+        if self._reranker_error:
+            if self._explicit_reranker_device_requested():
+                raise RuntimeError(f"Required reranker unavailable: {self._reranker_error}")
             return None
         try:
             tokenizer, model, device, torch = self._get_reranker()
@@ -473,7 +477,13 @@ class LocalPaperIndex:
             return scores
         except Exception as exc:
             self._reranker_error = f"{type(exc).__name__}: {exc}"
+            if self._explicit_reranker_device_requested():
+                raise RuntimeError(f"Required reranker unavailable: {self._reranker_error}") from exc
             return None
+
+    def _explicit_reranker_device_requested(self) -> bool:
+        device_setting = self.settings.scholar_reranker_device.strip().lower()
+        return device_setting not in {"", "auto"}
 
     def search(
         self,

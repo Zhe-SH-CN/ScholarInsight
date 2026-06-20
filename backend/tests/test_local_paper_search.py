@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from cg.settings import Settings
 from cg.tools.local_paper_search import LocalPaperIndex, canonical_paper_title
 
@@ -10,6 +12,42 @@ def _index() -> LocalPaperIndex:
     index = LocalPaperIndex.__new__(LocalPaperIndex)
     index.settings = Settings(scholar_source_gate_enabled=True)
     return index
+
+
+def test_explicit_cuda_reranker_failure_is_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:
+    index = LocalPaperIndex.__new__(LocalPaperIndex)
+    index.settings = Settings(
+        scholar_enable_reranker=True,
+        scholar_reranker_device="cuda",
+    )
+    index._reranker = None
+    index._reranker_error = None
+
+    def fail_load():
+        raise RuntimeError("No CUDA GPUs are available")
+
+    monkeypatch.setattr(index, "_get_reranker", fail_load)
+
+    with pytest.raises(RuntimeError, match="Required reranker unavailable"):
+        index._rerank_scores("RAG with Knowledge Graphs", [{"title": "GraphRAG"}])
+
+
+def test_auto_reranker_failure_can_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    index = LocalPaperIndex.__new__(LocalPaperIndex)
+    index.settings = Settings(
+        scholar_enable_reranker=True,
+        scholar_reranker_device="auto",
+    )
+    index._reranker = None
+    index._reranker_error = None
+
+    def fail_load():
+        raise RuntimeError("No CUDA GPUs are available")
+
+    monkeypatch.setattr(index, "_get_reranker", fail_load)
+
+    assert index._rerank_scores("RAG with Knowledge Graphs", [{"title": "GraphRAG"}]) is None
+    assert "No CUDA GPUs are available" in index._reranker_error
 
 
 def test_canonical_title_recovers_iclr_numbered_metadata() -> None:
