@@ -4097,7 +4097,7 @@ def build_analysis_report(
         )
         if representative_evidence:
             examples = [
-                f"{item.paper or '相关论文'}：{compact_fact(item.fact, 120)}"
+                f"{compact_paper_title(item.paper or '相关论文', 70)}：{report_evidence_snippet(item)}"
                 f"{citations_for_ids([item.evidence_id], citation_numbers)}"
                 for item in representative_evidence[:4]
             ]
@@ -4254,6 +4254,21 @@ def report_ready_representative_evidence(
         key=lambda item: item.confidence,
         reverse=True,
     )
+
+
+def report_evidence_snippet(item: Evidence, max_len: int = 92) -> str:
+    text = item.quote or item.fact
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    cleaned = re.sub(
+        r"^.+?在[^:：]{0,120}相关论文文本中出现了可核验表述[:：]\s*",
+        "",
+        cleaned,
+    ).strip()
+    paper = (item.paper or item.source_title or "").strip()
+    if paper and cleaned.startswith(paper):
+        cleaned = cleaned[len(paper):].lstrip(" :：-–—,.;，。")
+    cleaned = cleaned or item.fact or item.quote or "见 Evidence 附录"
+    return compact_fact(cleaned, max_len)
 
 
 def has_citable_dimension_cells(cells: list[MatrixCell]) -> bool:

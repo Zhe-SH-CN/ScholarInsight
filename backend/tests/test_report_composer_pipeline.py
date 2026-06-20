@@ -365,6 +365,40 @@ def test_analysis_report_does_not_promote_audit_only_representative_evidence() -
     assert "代表性证据显示" not in report
 
 
+def test_report_ready_representative_evidence_uses_clean_snippets() -> None:
+    request = ResearchRequest(
+        project_name="Representative snippet cleanup regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready(f"ev_ready_{index}", paper).model_copy(
+            update={
+                "fact": (
+                    f"{paper} 在核心反事实推断相关论文文本中出现了可核验表述："
+                    "identifiability assumptions are evaluated through a shared protocol"
+                ),
+                "quote": "identifiability assumptions are evaluated through a shared protocol",
+            }
+        )
+        for index, paper in enumerate(["Paper A", "Paper B", "Paper C", "Paper D"], start=1)
+    ]
+    report = pipeline_module.build_analysis_report(
+        request,
+        evidence,
+        [_report_ready_claim()],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+    )
+
+    body = report.split("## Evidence 附录", 1)[0]
+    assert "代表性支撑证据" in body
+    assert "identifiability assumptions are evaluated through a shared protocol" in body
+    assert "相关论文文本中出现了可核验表述" not in body
+
+
 def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> None:
     request = ResearchRequest(
         project_name="Grounded recommendation regression",
