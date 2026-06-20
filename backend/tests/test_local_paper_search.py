@@ -353,6 +353,34 @@ def test_causal_reasoning_llm_gate_accepts_core_benchmark() -> None:
     assert _index()._topic_rejection_reason("Causal Reasoning with LLMs benchmark", paper) == ""
 
 
+def test_causal_reasoning_llm_gate_rejects_causal_rag_drift() -> None:
+    paper = {
+        "title": "CausalRAG: Integrating Causal Graphs into Retrieval-Augmented Generation",
+        "abstract": (
+            "Large language models use retrieval-augmented generation to integrate "
+            "external knowledge. This work proposes a RAG framework that incorporates "
+            "causal graphs into retrieval and evaluates answer faithfulness, context "
+            "recall, and context precision."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/causalrag.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs representation shift",
+        paper,
+    )
+
+    assert subtype.label == "rag_or_retrieval_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes RAG/retrieval/QA papers unless they evaluate LLM causal reasoning"
+    )
+    assert _index()._topic_rejection_reason(
+        "Causal Reasoning with LLMs representation shift",
+        paper,
+    ) == subtype.rejection_reason
+
+
 def test_counterfactual_inference_gate_rejects_generic_bayes() -> None:
     paper = {
         "title": "Large Language Bayes",

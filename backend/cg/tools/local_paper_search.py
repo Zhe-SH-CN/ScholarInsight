@@ -1011,6 +1011,43 @@ class LocalPaperIndex:
 
     def _causal_reasoning_llm_subtype(self, paper: dict) -> SourceSubtype:
         title, primary = self._paper_primary_compact(paper)
+        retrieval_or_qa_drift = any(
+            marker in title or marker in primary
+            for marker in (
+                "rag",
+                "retrieval-augmented generation",
+                "retrieval augmented generation",
+                "graph-based rag",
+                "graph based rag",
+                "graphrag",
+                "knowledge graph",
+                "tableqa",
+                "question answering",
+            )
+        )
+        explicit_llm_causal_eval = any(
+            marker in primary
+            for marker in (
+                "causal reasoning capability",
+                "causal reasoning capabilities",
+                "causal reasoning in large language models",
+                "causal reasoning of large language models",
+                "causal abilities in large language models",
+                "large language models infer causation",
+                "benchmarking llms against statistical pitfalls in causal inference",
+                "evaluate large language models on causal",
+                "evaluates large language models on causal",
+                "llm causal reasoning",
+                "llms' causal reasoning",
+                "llms causal reasoning",
+            )
+        )
+        if retrieval_or_qa_drift and not explicit_llm_causal_eval:
+            return SourceSubtype(
+                "rag_or_retrieval_adjacent",
+                "paper uses causal language inside RAG/retrieval/QA rather than studying LLM causal reasoning ability",
+                "Causal reasoning with LLMs query excludes RAG/retrieval/QA papers unless they evaluate LLM causal reasoning",
+            )
         has_llm = any(
             marker in primary
             for marker in (
