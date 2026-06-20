@@ -1133,6 +1133,21 @@ class LocalPaperIndex:
                 "paper primarily studies probabilistic or uncertainty reasoning rather than LLM causal reasoning",
                 "Causal reasoning with LLMs query requires causal/counterfactual reasoning as the primary task",
             )
+        cot_verification_adjacent = (
+            ("chain-of-thought" in primary or "chain of thought" in primary or "cot" in primary)
+            and (
+                "computational graph" in primary
+                or "reasoning verification" in primary
+                or "reasoning correctness" in primary
+                or "attribution graph" in primary
+            )
+        )
+        if cot_verification_adjacent and not explicit_llm_causal_eval:
+            return SourceSubtype(
+                "llm_reasoning_adjacent",
+                "paper studies chain-of-thought or reasoning-process verification rather than LLM causal reasoning ability",
+                "Causal reasoning with LLMs query requires causal/counterfactual reasoning as the primary task",
+            )
         has_llm = any(
             marker in primary
             for marker in (

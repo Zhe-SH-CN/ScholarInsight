@@ -600,6 +600,31 @@ def test_causal_reasoning_llm_gate_rejects_opinion_alignment_drift() -> None:
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_cot_computational_graph_drift() -> None:
+    paper = {
+        "title": "Verifying Chain-of-Thought Reasoning via Its Computational Graph",
+        "abstract": (
+            "Current chain-of-thought verification methods predict reasoning correctness. "
+            "The paper builds attribution graphs and computational graph explanations "
+            "for language model reasoning processes, but does not evaluate causal or "
+            "counterfactual reasoning ability."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/cot_computational_graph.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs causal tracing activation patching",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "llm_reasoning_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query requires causal/counterfactual reasoning as the primary task"
+    )
+
+
 def test_causal_reasoning_llm_gate_keeps_agent_counterfactuals_out_of_benchmark_role() -> None:
     paper = {
         "title": "Abstract Counterfactuals for Language Model Agents",
