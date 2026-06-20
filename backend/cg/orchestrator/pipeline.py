@@ -2710,9 +2710,11 @@ def cross_role_report_ready_synthesis_text(
     role_counts = claim_source_role_paper_counts(supporting)
     role_parts = []
     for role in source_roles:
+        phrase = source_role_contribution_phrase(role, cluster.label)
+        separator = " " if phrase[:1].isascii() else ""
         role_parts.append(
             f"{source_role_label(role)} 来源（{role_counts.get(role, 0)} 篇）侧重"
-            f"{source_role_contribution_phrase(role, cluster.label)}"
+            f"{separator}{phrase}"
         )
     axis = cluster_axis_phrase(cluster.label)
     return (
@@ -3935,14 +3937,14 @@ def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, cl
     lead_claims = sorted(verified, key=lambda item: item.confidence, reverse=True)[:3]
     if lead_claims:
         for claim in lead_claims:
-            findings.append(f"{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}：{compact_fact(best_claim_text(claim), 150)}")
+            findings.append(f"{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}：{compact_fact(best_claim_text(claim), 300)}")
     elif claims:
         findings.append("本轮 Red Team 尚未确认足够多的稳健 Claim；以下内容只能作为待验证观察和补证线索。")
 
     return findings[:5] or ["本次运行已形成基础证据库，但仍需要更多可交叉验证的高质量来源来支撑强结论。"]
 
 
-def report_ready_finding_lines(claims: list[Claim], limit: int = 3, max_len: int = 180) -> list[str]:
+def report_ready_finding_lines(claims: list[Claim], limit: int = 3, max_len: int = 300) -> list[str]:
     ready_claims = sorted(
         [claim for claim in claims if is_report_ready_claim(claim)],
         key=lambda item: (item.confidence, item.source_paper_count, len(item.supporting_evidence_ids)),
@@ -4335,7 +4337,20 @@ def build_dimension_fallback_points(
 
 def compact_fact(text: str, max_len: int = 96) -> str:
     cleaned = re.sub(r"\s+", " ", text).strip()
-    return cleaned if len(cleaned) <= max_len else cleaned[: max_len - 3] + "..."
+    if len(cleaned) <= max_len:
+        return cleaned
+    cutoff = max(1, max_len - 3)
+    snippet = cleaned[:cutoff].rstrip()
+    boundary = max(snippet.rfind(mark) for mark in ("。", "；", "，", "、", ";", ",", " "))
+    if boundary >= int(cutoff * 0.7):
+        snippet = snippet[: boundary + 1].rstrip()
+    elif cutoff < len(cleaned) and snippet and cleaned[cutoff : cutoff + 1]:
+        next_char = cleaned[cutoff]
+        if snippet[-1].isascii() and snippet[-1].isalnum() and next_char.isascii() and next_char.isalnum():
+            word_boundary = max(snippet.rfind(" "), snippet.rfind(";"), snippet.rfind(","))
+            if word_boundary >= int(cutoff * 0.6):
+                snippet = snippet[:word_boundary].rstrip()
+    return snippet.rstrip(" ,;，；、") + "..."
 
 
 def best_claim_text(claim: Claim) -> str:
@@ -4506,7 +4521,7 @@ def build_executive_summary(
     recommendations: list[OpportunityRecommendation],
     claims: list[Claim] | None = None,
 ) -> str:
-    ready_findings = report_ready_finding_lines(claims or [], limit=3, max_len=170) if claims is not None else []
+    ready_findings = report_ready_finding_lines(claims or [], limit=3, max_len=300) if claims is not None else []
     lines = [
         f"# {request.project_name} · Executive Summary",
         "",

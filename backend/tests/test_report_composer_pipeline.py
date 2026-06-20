@@ -253,6 +253,60 @@ async def test_write_report_fallback_splits_report_ready_and_audit_only_claims(
     )
 
 
+def test_report_ready_summary_keeps_cross_role_contrast_readable() -> None:
+    request = ResearchRequest(
+        project_name="Cross-role summary regression",
+        target_topic="Scientific Reasoning with LLMs",
+        analysis_dimensions=["lab_workflow_reasoning"],
+    )
+    claim = Claim(
+        claim_id="claim_cross_role",
+        run_id="run_test",
+        dimension="lab_workflow_reasoning",
+        dimension_label="实验流程推理",
+        claim=(
+            "在实验流程推理维度，4 篇论文共同围绕“scientific discovery workflow protocol”"
+            "形成来源角色分工对照：scientific reasoning benchmark 来源（2 篇）侧重"
+            "任务定义、数据集构造和评测协议；scientific discovery agent/workflow 来源（2 篇）"
+            "侧重 agent workflow、工具调用和研究流程编排。该结论限定于假设生成、实验设计、"
+            "数据驱动发现、agent 协作或研究流程编排这一证据轴，可作为报告主体中的范围限定综合结论。"
+        ),
+        supporting_evidence_ids=["ev_a", "ev_b", "ev_c", "ev_d"],
+        confidence=0.88,
+        risk_level="low",
+        reasoning_summary="Supported by two benchmark papers and two discovery-agent papers.",
+        verification_status="verified",
+        claim_type="cross_role_contrast",
+        source_paper_count=4,
+        evidence_support_level="strong",
+        supporting_source_subtypes=[
+            "scientific_reasoning_benchmark",
+            "scientific_discovery_agent",
+        ],
+        supporting_source_subtype_counts={
+            "scientific_reasoning_benchmark": 2,
+            "scientific_discovery_agent": 2,
+        },
+        supporting_source_subtype_paper_counts={
+            "scientific_reasoning_benchmark": 2,
+            "scientific_discovery_agent": 2,
+        },
+    )
+
+    summary = pipeline_module.build_executive_summary(
+        request,
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _observability(),
+        [],
+        [claim],
+    )
+
+    assert "## Report-ready Findings" in summary
+    assert "scientific discovery agent/workflow 来源（2 篇）侧重 agent workflow、工具调用和研究流程编排" in summary
+    assert "age..." not in summary
+    assert "agent..." not in summary
+
+
 def _evidence() -> Evidence:
     now = datetime.now(timezone.utc)
     return Evidence(
