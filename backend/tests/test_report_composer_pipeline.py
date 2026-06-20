@@ -343,6 +343,9 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "## 可检验研究假设与学术背书" in report
     assert "## 证据背书机会表" in report
     assert "## 形式化证据门控与数学背书" in report
+    assert "## 可证伪实验设计与负结果记录" in report
+    assert "Falsification coverage：1/1" in report
+    assert "failure_observation" in report
     assert "g(c)=1 iff" in report
     assert "R_c subset R_reportable" in report
     assert "\\|E_c\\|=4" in report
@@ -532,6 +535,53 @@ def test_analysis_report_renders_counterexample_audit_as_audit_only_section() ->
     assert "source gate rejected it: adjacent source role" in report
     evidence_appendix = report.split("## Evidence 附录", 1)[1]
     assert "Counterfactual recourse fairness under shifted assumptions" not in evidence_appendix
+
+
+def test_falsification_plan_rows_cover_report_ready_claims_and_link_hard_negatives() -> None:
+    request = ResearchRequest(
+        project_name="Falsification plan regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    counterexample = CounterexampleAuditRow(
+        audit_id="cex_falsify",
+        target_claim_id="claim_report_ready",
+        target_dimension="core_counterfactual_inference",
+        target_dimension_label="Core Counterfactual Inference",
+        target_axis="Core Counterfactual Inference",
+        source_title="Counterfactual recourse fairness under shifted assumptions",
+        source_url="/papers/adjacent_recource.pdf",
+        source_subtype="counterfactual_explanation_or_fairness",
+        relevance_score=0.58,
+        relevance_label="reject",
+        rejection_reason="counterfactual explanation/fairness adjacent to core inference",
+        counterexample_type="hard_negative_boundary",
+        semantic_quality=0.7,
+        report_visible=True,
+        boundary_challenge="Adjacent fairness source challenges the inference boundary.",
+    )
+
+    rows = pipeline_module.build_falsification_plan_rows(
+        request,
+        [_report_ready_claim(), _sample_limited_claim()],
+        [counterexample],
+    )
+
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.target_claim_id == "claim_report_ready"
+    assert row.linked_counterexample_audit_ids == ["cex_falsify"]
+    assert "去除或打乱" in row.falsification_criterion
+    assert "paired benchmark" in row.benchmark_or_task_perturbation
+    assert "错误类型不变" in row.expected_failure_mode
+    assert row.negative_result_logging_schema["decision"] == "support, falsified, or scope_narrowing_required"
+
+
+def test_falsification_plan_section_degrades_without_report_ready_claims() -> None:
+    section = "\n".join(pipeline_module.build_falsification_plan_section([], []))
+
+    assert "当前尚无通过 `g(c)` 的 report-ready claim" in section
+    assert "不生成可证伪实验计划" in section
 
 
 def test_formal_evidence_gate_records_cross_role_minimum_certificate() -> None:

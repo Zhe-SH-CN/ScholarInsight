@@ -1803,6 +1803,8 @@ class ReportComposerAgent(BaseAgent):
                 "优先引用较新的证据，若只有旧证据可用，应在报告中注明'截至YYYY年MM月'并提示信息可能已更新\n"
                 "13. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的学术分析。\n"
                 "14. 如果 briefing notes 对某个判断支持不足，请直接写'现有公开证据不足以判断'，不要补充想象。\n"
+                "15. 若 briefing notes 提供 falsification_plan，后续研究路线必须包含可推翻条件、"
+                "task perturbation 和负结果记录；不得只写成功路径。\n"
                 "\n"
                 "【报告结构】（Markdown格式）\n"
                 "# [报告标题]\n"
@@ -1911,6 +1913,7 @@ class ReportComposerAgent(BaseAgent):
         matrix: PaperPatternMatrix | None = artifacts.get("matrix")
         recommendations: list[OpportunityRecommendation] = artifacts.get("recommendations") or []
         observability: ObservabilitySnapshot | None = artifacts.get("observability")
+        falsification_plan = artifacts.get("falsification_plan") or []
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
         entities = matrix.papers[:12] if matrix and matrix.papers else [request.target_topic]
 
@@ -2072,6 +2075,18 @@ class ReportComposerAgent(BaseAgent):
             "claim_backlog": tentative_claims[:18],
             "do_not_use_as_conclusions": do_not_use_as_conclusions[:8],
             "representative_evidence": evidence_brief,
+            "falsification_plan": [
+                {
+                    "target_dimension": item.get("target_dimension_label") if isinstance(item, dict) else item.target_dimension_label,
+                    "target_axis": short(item.get("target_axis") if isinstance(item, dict) else item.target_axis, 120),
+                    "claim_summary": short(item.get("target_claim_summary") if isinstance(item, dict) else item.target_claim_summary, 180),
+                    "falsification_criterion": short(item.get("falsification_criterion") if isinstance(item, dict) else item.falsification_criterion, 220),
+                    "task_perturbation": short(item.get("benchmark_or_task_perturbation") if isinstance(item, dict) else item.benchmark_or_task_perturbation, 220),
+                    "expected_failure_mode": short(item.get("expected_failure_mode") if isinstance(item, dict) else item.expected_failure_mode, 180),
+                    "decision_rule": short(item.get("decision_rule") if isinstance(item, dict) else item.decision_rule, 180),
+                }
+                for item in falsification_plan[:8]
+            ],
             "recommendations": [
                 {
                     "title": item.title,

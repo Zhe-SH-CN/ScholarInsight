@@ -442,6 +442,25 @@ class CounterexampleAuditRow(BaseModel):
     audit_only_reason: str = ""
 
 
+class FalsificationPlanRow(BaseModel):
+    plan_id: str
+    target_claim_id: str
+    target_dimension: str
+    target_dimension_label: str
+    target_axis: str = ""
+    target_claim_summary: str = ""
+    claim_type: str = "comparative"
+    evidence_certificate: str = ""
+    falsification_criterion: str = ""
+    benchmark_or_task_perturbation: str = ""
+    expected_failure_mode: str = ""
+    negative_result_logging_schema: dict[str, str] = Field(default_factory=dict)
+    linked_counterexample_audit_ids: list[str] = Field(default_factory=list)
+    linked_counterexample_sources: list[str] = Field(default_factory=list)
+    decision_rule: str = ""
+    report_action_if_falsified: str = ""
+
+
 class TraceEvent(BaseModel):
     event_id: str
     run_id: str

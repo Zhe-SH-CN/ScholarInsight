@@ -33,6 +33,7 @@ from cg.schemas.research import (
     Claim,
     CounterexampleAuditRow,
     EvidenceCluster,
+    FalsificationPlanRow,
     PaperPatternMatrix,
     PaperProfile,
     DEFAULT_DIMENSIONS,
@@ -906,6 +907,11 @@ class ResearchPipeline:
                     counterexample_candidates,
                     selected_source_urls=[document.url for document in all_documents if document.ok],
                 )
+                artifacts["falsification_plan"] = build_falsification_plan_rows(
+                    request,
+                    reviewed_claims,
+                    artifacts["counterexample_audit"],
+                )
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -922,6 +928,7 @@ class ResearchPipeline:
                     artifacts["matrix"], artifacts["recommendations"],
                     artifacts["observability"],
                     artifacts.get("counterexample_audit", []),
+                    artifacts.get("falsification_plan", []),
                 )
                 if report_fallbacks:
                     status.warnings.append(
@@ -1221,6 +1228,11 @@ class ResearchPipeline:
                     counterexample_candidates,
                     selected_source_urls=[document.url for document in all_documents if document.ok],
                 )
+                artifacts["falsification_plan"] = build_falsification_plan_rows(
+                    request,
+                    reviewed_claims,
+                    artifacts["counterexample_audit"],
+                )
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -1234,6 +1246,7 @@ class ResearchPipeline:
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"], artifacts["observability"],
                     artifacts.get("counterexample_audit", []),
+                    artifacts.get("falsification_plan", []),
                 )
                 if report_fallbacks:
                     status.warnings.append(
@@ -1815,6 +1828,7 @@ class ResearchPipeline:
         observability = artifacts["observability"]
         evidence_clusters = artifacts.get("evidence_clusters", [])
         counterexample_audit = artifacts.get("counterexample_audit", [])
+        falsification_plan = artifacts.get("falsification_plan", [])
         await atomic_write_json(run_dir / "exports" / "matrix.json", matrix)
         await write_text(run_dir / "exports" / "matrix.csv", build_matrix_csv(matrix))
         await atomic_write_json(run_dir / "exports" / "recommendations.json", recommendations)
@@ -1823,6 +1837,7 @@ class ResearchPipeline:
         await atomic_write_json(run_dir / "exports" / "evidence_graph.json", evidence_graph)
         await atomic_write_json(run_dir / "exports" / "evidence_clusters.json", evidence_clusters)
         await atomic_write_json(run_dir / "exports" / "counterexample_audit.json", counterexample_audit)
+        await atomic_write_json(run_dir / "exports" / "falsification_plan.json", falsification_plan)
 
     async def write_report(
         self,
@@ -1835,11 +1850,17 @@ class ResearchPipeline:
         recommendations: list[OpportunityRecommendation],
         observability: ObservabilitySnapshot,
         counterexample_audit: list[CounterexampleAuditRow] | None = None,
+        falsification_plan: list[FalsificationPlanRow] | None = None,
     ) -> list[dict[str, str]]:
         composer = ReportComposerAgent(self.agent_context(run_id))
         fallbacks: list[dict[str, str]] = []
         run_dir = self.runs.run_dir(run_id)
         counterexample_audit = counterexample_audit or []
+        falsification_plan = falsification_plan or build_falsification_plan_rows(
+            request,
+            claims,
+            counterexample_audit,
+        )
 
         async def run_section(
             section: str,
@@ -1879,6 +1900,7 @@ class ResearchPipeline:
                     "recommendations": recommendations,
                     "observability": observability,
                     "counterexample_audit": counterexample_audit,
+                    "falsification_plan": falsification_plan,
                 },
             ),
             build_analysis_report(
@@ -1890,6 +1912,7 @@ class ResearchPipeline:
                 recommendations,
                 observability,
                 counterexample_audit,
+                falsification_plan,
             ),
         )
         await write_text(run_dir / "reports" / "report.md", report)
@@ -4083,8 +4106,14 @@ def build_analysis_report(
     recommendations: list[OpportunityRecommendation],
     observability: ObservabilitySnapshot,
     counterexample_audit: list[CounterexampleAuditRow] | None = None,
+    falsification_plan: list[FalsificationPlanRow] | None = None,
 ) -> str:
     counterexample_audit = counterexample_audit or []
+    falsification_plan = falsification_plan or build_falsification_plan_rows(
+        request,
+        claims,
+        counterexample_audit,
+    )
     citation_numbers, reference_lines = build_citation_index(evidence)
     core_findings = build_core_findings(request, matrix, claims)
     target_strengths, target_weaknesses = build_target_advantage_analysis(request, matrix, claims, citation_numbers)
@@ -4128,6 +4157,10 @@ def build_analysis_report(
         "## 反例与负结果审计",
         "",
         *build_counterexample_audit_section(counterexample_audit, sorted_report_ready_claims(claims)),
+        "",
+        "## 可证伪实验设计与负结果记录",
+        "",
+        *build_falsification_plan_section(falsification_plan, sorted_report_ready_claims(claims)),
         "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
@@ -5055,6 +5088,180 @@ def build_counterexample_audit_section(
                     f"{row.semantic_quality:.2f}",
                     compact_fact(reason, 120),
                     compact_fact(row.boundary_challenge, 150),
+                ]
+            )
+            + "|"
+        )
+    return lines
+
+
+def build_falsification_plan_rows(
+    request: ResearchRequest,
+    claims: list[Claim],
+    counterexample_audit: list[CounterexampleAuditRow] | None = None,
+    limit: int | None = None,
+) -> list[FalsificationPlanRow]:
+    ready_claims = sorted_report_ready_claims(claims, limit=limit)
+    if not ready_claims:
+        return []
+
+    rows_by_claim: dict[str, list[CounterexampleAuditRow]] = defaultdict(list)
+    for row in counterexample_audit or []:
+        rows_by_claim[row.target_claim_id].append(row)
+
+    plans: list[FalsificationPlanRow] = []
+    for claim in ready_claims:
+        axis = (
+            cluster_axis_phrase(claim.evidence_cluster_label)
+            if claim.evidence_cluster_label
+            else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+        )
+        linked_rows = sorted(
+            rows_by_claim.get(claim.claim_id, []),
+            key=lambda row: (row.report_visible, row.semantic_quality, row.relevance_score),
+            reverse=True,
+        )[:3]
+        linked_sources = [
+            compact_fact(row.source_title, 80)
+            for row in linked_rows
+            if row.source_title
+        ]
+        plans.append(
+            FalsificationPlanRow(
+                plan_id=stable_id("falsify", f"{request.target_topic}:{claim.claim_id}:{axis}"),
+                target_claim_id=claim.claim_id,
+                target_dimension=claim.dimension,
+                target_dimension_label=DIMENSION_LABELS.get(claim.dimension, claim.dimension_label),
+                target_axis=axis,
+                target_claim_summary=compact_fact(best_claim_text(claim), 220),
+                claim_type=claim.claim_type,
+                evidence_certificate=formal_gate_certificate(claim),
+                falsification_criterion=falsification_criterion_text(request, claim, axis),
+                benchmark_or_task_perturbation=falsification_perturbation_text(request, claim, axis),
+                expected_failure_mode=falsification_failure_mode_text(claim, axis),
+                negative_result_logging_schema=negative_result_logging_schema(claim),
+                linked_counterexample_audit_ids=[row.audit_id for row in linked_rows],
+                linked_counterexample_sources=linked_sources,
+                decision_rule=falsification_decision_rule(claim),
+                report_action_if_falsified=(
+                    "若触发推翻条件，将该命题从主体贡献移入 challenged backlog；"
+                    "正文只保留为边界观察，并在附录记录反例、消融设置和负结果。"
+                ),
+            )
+        )
+    return plans
+
+
+def falsification_criterion_text(request: ResearchRequest, claim: Claim, axis: str) -> str:
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            f"在 {request.target_topic} 的同一任务协议下，若单一 source role 或随机替代 role "
+            f"即可解释“{axis}”上的主要指标变化，或 add/remove source-role 变量不改变错误类型，"
+            "则该来源分工命题必须被推翻或收窄。"
+        )
+    return (
+        f"若去除或打乱“{axis}”机制后，baseline 与机制增强版本在主要指标、错误类型和反例集上无实质差异，"
+        f"或相邻 hard-negative source 能同样解释 {request.target_topic} 中的现象，则该命题必须被推翻或收窄。"
+    )
+
+
+def falsification_perturbation_text(request: ResearchRequest, claim: Claim, axis: str) -> str:
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            "构造 matched task slices：固定输入、评价指标和数据分布，分别保留全部 source-role 变量、"
+            "移除一个 role、只保留单一 role、加入 hard-negative adjacent role，比较性能和错误类型。"
+        )
+    return (
+        f"围绕“{axis}”构造 paired benchmark：原始设置、机制删除/置换、分布外或噪声扰动、"
+        f"以及与 {request.target_topic} 相邻但不应支撑主体命题的 hard-negative 任务切片。"
+    )
+
+
+def falsification_failure_mode_text(claim: Claim, axis: str) -> str:
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            "预期失败模式包括：source-role 互补性消失、单一 role 已足够、跨任务迁移失败、"
+            "或新增 adjacent role 后原有分工解释不再成立。"
+        )
+    return (
+        f"预期失败模式包括：“{axis}”机制消融后指标不变、错误类型不变、反例集表现无差异，"
+        "或该机制只在单一论文/单一数据切片上成立。"
+    )
+
+
+def negative_result_logging_schema(claim: Claim) -> dict[str, str]:
+    return {
+        "claim_id": claim.claim_id,
+        "task_slice": "benchmark slice or source-role slice under test",
+        "baseline": "control system without the target mechanism/source-role variable",
+        "mechanism_variant": "mechanism-enhanced, ablated, swapped, or source-role-removed variant",
+        "counterexample_source": "linked hard-negative or adjacent source used for boundary testing",
+        "primary_metric": "main score plus confidence interval or paired comparison criterion",
+        "failure_observation": "no improvement, regression, unchanged error type, or hard-negative match",
+        "decision": "support, falsified, or scope_narrowing_required",
+    }
+
+
+def falsification_decision_rule(claim: Claim) -> str:
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            "若任一核心 source-role 消融不造成指标或错误类型变化，或 hard-negative role 给出等价解释，"
+            "则标记为 scope_narrowing_required；若两个以上独立切片重复该现象，则标记为 falsified。"
+        )
+    return (
+        "若机制删除/置换与原设置无可解释差异，或 hard-negative 切片复制同一结论，"
+        "则标记为 scope_narrowing_required；若两个以上独立论文/任务切片重复该现象，则标记为 falsified。"
+    )
+
+
+def build_falsification_plan_section(
+    rows: list[FalsificationPlanRow],
+    ready_claims: list[Claim] | None = None,
+    limit: int = 6,
+) -> list[str]:
+    ready_claims = ready_claims or []
+    if not rows:
+        if ready_claims:
+            return [
+                "当前存在 report-ready claim，但尚未生成结构化 falsification plan；不应进入投稿实验设计。",
+            ]
+        return [
+            "当前尚无通过 `g(c)` 的 report-ready claim，因此不生成可证伪实验计划；应先补充核心论文、反例和可复现实验协议。",
+        ]
+
+    covered_claim_ids = {row.target_claim_id for row in rows}
+    total = len(ready_claims) or len(covered_claim_ids)
+    coverage = len(covered_claim_ids & {claim.claim_id for claim in ready_claims}) if ready_claims else len(covered_claim_ids)
+    lines = [
+        "以下计划把主体命题改写成可推翻的实验单元；每条计划必须记录负结果，不能只记录成功案例。",
+        f"Falsification coverage：{coverage}/{total} 条 report-ready claim 已绑定可证伪计划。",
+        "",
+        "| 命题轴 | 推翻条件 | benchmark / task perturbation | 预期失败模式 | 负结果记录 | hard-negative link |",
+        "|---|---|---|---|---|---|",
+    ]
+    for row in rows[:limit]:
+        linked = "；".join(row.linked_counterexample_sources[:2]) or "无显式 hard-negative；需补检索"
+        logging_keys = ", ".join(
+            key
+            for key in [
+                "task_slice",
+                "primary_metric",
+                "failure_observation",
+                "decision",
+            ]
+            if key in row.negative_result_logging_schema
+        )
+        lines.append(
+            "|"
+            + "|".join(
+                csv_safe_markdown(value)
+                for value in [
+                    compact_fact(row.target_axis, 72),
+                    compact_fact(row.falsification_criterion, 135),
+                    compact_fact(row.benchmark_or_task_perturbation, 135),
+                    compact_fact(row.expected_failure_mode, 115),
+                    compact_fact(logging_keys, 90),
+                    compact_fact(linked, 95),
                 ]
             )
             + "|"

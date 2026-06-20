@@ -28,6 +28,7 @@ from cg.orchestrator.pipeline import (  # noqa: E402
     build_counterexample_audit_rows,
     build_claims_from_clusters,
     build_evidence_clusters,
+    build_falsification_plan_rows,
     claim_report_ready_reason,
     extract_evidence_from_document,
     prepare_claims_for_review,
@@ -306,8 +307,19 @@ async def audit_topic(
         candidates,
         selected_source_urls=[item.url for item in selected],
     )
+    falsification_plan = build_falsification_plan_rows(
+        request,
+        claims,
+        counterexample_audit,
+    )
     counterexample_types = Counter(row.counterexample_type for row in counterexample_audit)
     counterexample_visible_count = sum(1 for row in counterexample_audit if row.report_visible)
+    report_ready_claim_ids = {
+        claim.claim_id
+        for claim in claims
+        if not claim_report_ready_reason(claim)
+    }
+    falsification_claim_ids = {row.target_claim_id for row in falsification_plan}
 
     claim_statuses = Counter(claim.verification_status for claim in claims)
     claim_types = Counter(claim.claim_type for claim in claims)
@@ -348,7 +360,14 @@ async def audit_topic(
             "counterexample_types": counterexample_types,
             "metadata_noise_count": counterexample_types.get("metadata_noise", 0),
         },
+        "falsification_plan_summary": {
+            "row_count": len(falsification_plan),
+            "report_ready_claim_count": len(report_ready_claim_ids),
+            "covered_report_ready_claim_count": len(report_ready_claim_ids & falsification_claim_ids),
+            "missing_report_ready_claim_ids": sorted(report_ready_claim_ids - falsification_claim_ids),
+        },
         "counterexample_audit": [row.model_dump(mode="json") for row in counterexample_audit],
+        "falsification_plan": [row.model_dump(mode="json") for row in falsification_plan],
         "claims": [claim_row(claim) for claim in claims],
         "clusters": [cluster.model_dump(mode="json") for cluster in clusters],
     }
