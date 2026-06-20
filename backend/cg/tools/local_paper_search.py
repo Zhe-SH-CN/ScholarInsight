@@ -1152,6 +1152,9 @@ class LocalPaperIndex:
                 "causal ability",
                 "causal question",
                 "causal benchmark",
+                "causal world model",
+                "causal world models",
+                "causal understanding",
                 "statistical pitfalls in causal inference",
             )
         )
@@ -1166,7 +1169,45 @@ class LocalPaperIndex:
                 "paper lacks explicit causal/counterfactual reasoning evidence for LLMs",
                 "Causal reasoning with LLMs query requires causal/counterfactual reasoning and LLM signal",
             )
-        if "benchmark" in title or "evaluat" in primary or "pitfall" in primary:
+        training_testbed_adjacent = (
+            (
+                "reinforcement learning with verifiable rewards" in primary
+                or "rlvr" in primary
+                or "post-training" in primary
+            )
+            and "causal reasoning as a testbed" in primary
+        )
+        if training_testbed_adjacent:
+            return SourceSubtype(
+                "llm_training_testbed_adjacent",
+                "paper uses causal reasoning as a testbed for LLM training or post-training rather than studying causal reasoning itself",
+                "Causal reasoning with LLMs query excludes LLM training/post-training papers that only use causal reasoning as a testbed",
+            )
+        if "counterfactual" in title and (
+            "language model agent" in primary
+            or "language model agents" in primary
+            or "lm agent" in primary
+            or "lm agents" in primary
+        ):
+            return SourceSubtype(
+                "llm_counterfactual_reasoning",
+                "paper studies counterfactual reasoning with language model agents",
+            )
+        if "causal world model" in primary or "causal world models" in primary:
+            return SourceSubtype(
+                "core_llm_causal_reasoning",
+                "paper directly studies language agents with causal world models",
+            )
+        benchmark_like = (
+            "benchmark" in title
+            or "benchmark" in primary
+            or "pitfall" in primary
+            or "evaluating explicit causal reasoning in large language models" in primary
+            or "can large language models infer causation" in title
+            or ("evaluates whether large language models" in primary and "causal reasoning" in primary)
+            or ("dataset" in primary and "evaluat" in primary)
+        )
+        if benchmark_like:
             return SourceSubtype(
                 "causal_reasoning_benchmark",
                 "paper evaluates causal/counterfactual reasoning ability in LLMs",

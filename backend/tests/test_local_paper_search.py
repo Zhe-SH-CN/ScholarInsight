@@ -552,6 +552,74 @@ def test_causal_reasoning_llm_gate_rejects_sensor_health_application_drift() -> 
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_rlvr_testbed_drift() -> None:
+    paper = {
+        "title": "Generalization of RLVR Using Causal Reasoning as a Testbed",
+        "abstract": (
+            "Reinforcement learning with verifiable rewards (RLVR) is a post-training "
+            "method for large language models. The paper uses causal reasoning as a "
+            "testbed to study RLVR generalization."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/rlvr_causal_testbed.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs causal tools and counterfactual evaluation",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "llm_training_testbed_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes LLM training/post-training papers that only use causal reasoning as a testbed"
+    )
+
+
+def test_causal_reasoning_llm_gate_keeps_agent_counterfactuals_out_of_benchmark_role() -> None:
+    paper = {
+        "title": "Abstract Counterfactuals for Language Model Agents",
+        "abstract": (
+            "Counterfactual inference is a powerful tool for analysing and evaluating "
+            "autonomous agents. This work applies counterfactual reasoning to language "
+            "model agents and causal world simulations."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/abstract_counterfactual_agents.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs counterfactual evaluation",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "llm_counterfactual_reasoning"
+    assert subtype.rejection_reason == ""
+
+
+def test_causal_reasoning_llm_gate_classifies_causal_world_models_as_core_not_benchmark() -> None:
+    paper = {
+        "title": "Language Agents Meet Causality - Bridging LLMs and Causal World Models",
+        "abstract": (
+            "Large language models show promise in planning and reasoning. This work "
+            "studies language agents with causal world models to improve causal "
+            "understanding of environments."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/language_agents_causality.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs causal world model evaluation",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "core_llm_causal_reasoning"
+    assert subtype.rejection_reason == ""
+
+
 def test_causal_reasoning_llm_gate_rejects_uncertain_text_reasoning_drift() -> None:
     paper = {
         "title": "Reasoning over Uncertain Text by Generative Large Language Models",

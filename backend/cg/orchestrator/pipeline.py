@@ -2005,6 +2005,7 @@ SOURCE_ROLE_LABELS = {
     "core_llm_causal_reasoning": "core LLM causal reasoning",
     "causal_reasoning_benchmark": "LLM causal reasoning benchmark",
     "llm_counterfactual_reasoning": "LLM counterfactual reasoning",
+    "llm_training_testbed_adjacent": "LLM training/testbed adjacent",
     "core_counterfactual_inference": "core counterfactual inference",
     "treatment_effect_estimation": "treatment-effect estimation",
     "counterfactual_explanation_or_fairness": "counterfactual explanation/fairness",
