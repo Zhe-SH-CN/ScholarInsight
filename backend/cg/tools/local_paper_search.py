@@ -743,6 +743,14 @@ class LocalPaperIndex:
             or "time-evolving" in query_lower
             or "time evolving" in query_lower
         )
+        family = self._topic_family(gate_query)
+        if family in {
+            "causal_reasoning_llm",
+            "counterfactual_inference",
+            "multi_hop_graph_reasoning",
+        }:
+            subtype = self._source_subtype_for_topic(query, paper, target_topic=target_topic)
+            return subtype.rejection_reason
 
         if query_needs_dynamic_kg:
             dynamic_title_ok = any(
@@ -820,6 +828,14 @@ class LocalPaperIndex:
         target_topic: str | None = None,
     ) -> SourceSubtype:
         gate_query = self._query_with_topic(query, target_topic)
+        family = self._topic_family(gate_query)
+        if family == "causal_reasoning_llm":
+            return self._causal_reasoning_llm_subtype(paper)
+        if family == "counterfactual_inference":
+            return self._counterfactual_inference_subtype(paper)
+        if family == "multi_hop_graph_reasoning":
+            return self._multi_hop_graph_subtype(paper)
+
         terms = set(query_terms(gate_query))
         query_needs_kg = {"knowledge", "graph"}.issubset(terms) or "kg" in terms or "graph_rag" in terms
         query_needs_rag = (
@@ -828,13 +844,6 @@ class LocalPaperIndex:
             or {"retrieval", "augmented", "generation"}.issubset(terms)
         )
         if not (query_needs_kg and query_needs_rag):
-            family = self._topic_family(gate_query)
-            if family == "causal_reasoning_llm":
-                return self._causal_reasoning_llm_subtype(paper)
-            if family == "counterfactual_inference":
-                return self._counterfactual_inference_subtype(paper)
-            if family == "multi_hop_graph_reasoning":
-                return self._multi_hop_graph_subtype(paper)
             return SourceSubtype("unclassified", "")
 
         title = canonical_paper_title(paper)
@@ -991,10 +1000,12 @@ class LocalPaperIndex:
             or "language model" in lower
             or "language models" in lower
         )
-        if "counterfactual inference" in lower or {"counterfactual", "inference"}.issubset(terms):
+        if "counterfactual inference" in lower:
             return "counterfactual_inference"
         if has_llm and ("causal reasoning" in lower or {"causal", "reasoning"}.issubset(terms)):
             return "causal_reasoning_llm"
+        if {"counterfactual", "inference"}.issubset(terms):
+            return "counterfactual_inference"
         if (
             ("multi-hop" in lower or "multi hop" in lower or "multihop" in lower or {"multi", "hop"}.issubset(terms))
             and ("graph" in terms or "knowledge graph" in lower or "knowledge graphs" in lower)
@@ -1315,7 +1326,24 @@ class LocalPaperIndex:
                 "kgqa_or_graph_reasoning",
                 "paper centers graph/KG question answering or semantic parsing",
             )
-        if "rag" in primary or "retrieval-augmented" in primary or "retrieval augmented" in primary:
+        title_has_rag = (
+            "rag" in title
+            or "retrieval-augmented" in title
+            or "retrieval augmented" in title
+        )
+        primary_has_rag_framework = any(
+            marker in primary
+            for marker in (
+                "retrieval-augmented generation",
+                "retrieval augmented generation",
+                "graph retrieval augmented generation",
+                "graph retrieval-augmented generation",
+                "graphrag",
+                "graph-rag",
+                "graph rag",
+            )
+        )
+        if title_has_rag or primary_has_rag_framework:
             return SourceSubtype(
                 "graph_retrieval_rag_adjacent",
                 "paper connects graph reasoning with retrieval-augmented generation",

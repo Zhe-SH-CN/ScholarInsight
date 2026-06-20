@@ -381,6 +381,31 @@ def test_causal_reasoning_llm_gate_rejects_causal_rag_drift() -> None:
     ) == subtype.rejection_reason
 
 
+def test_causal_reasoning_target_topic_overrides_counterfactual_inference_terms() -> None:
+    paper = {
+        "title": "Unveiling Causal Reasoning in Large Language Models: Reality or Mirage?",
+        "abstract": (
+            "This work evaluates whether large language models have genuine causal "
+            "reasoning capability and includes counterfactual reasoning tasks."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/reality_or_mirage.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "formal evaluation of large language models causal interventions counterfactuals confounders do operator",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_reasoning_benchmark"
+    assert _index()._topic_rejection_reason(
+        "formal evaluation of large language models causal interventions counterfactuals confounders do operator",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    ) == ""
+
+
 def test_counterfactual_inference_gate_rejects_generic_bayes() -> None:
     paper = {
         "title": "Large Language Bayes",
@@ -543,3 +568,49 @@ def test_multi_hop_graph_gate_classifies_kgqa_benchmark() -> None:
 
     assert subtype.label == "graph_reasoning_benchmark"
     assert _index()._topic_rejection_reason("Multi-hop Reasoning on Graphs benchmark dataset", paper) == ""
+
+
+def test_multi_hop_graph_gate_keeps_kgqa_despite_retrieval_context() -> None:
+    paper = {
+        "title": "GNN-RAG: Graph Neural Retrieval for Efficient Large Language Model Reasoning on Knowledge Graphs",
+        "abstract": (
+            "Retrieval-augmented generation in Knowledge Graph Question Answering "
+            "enhances LLM reasoning on knowledge graphs by retrieving executable "
+            "relation paths for multi-hop question answering."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/gnn_rag.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "GNN-RAG graph neural retrieval efficient LLM reasoning on knowledge graphs",
+        paper,
+        target_topic="Multi-hop Reasoning on Graphs",
+    )
+
+    assert subtype.label == "kgqa_or_graph_reasoning"
+
+
+def test_multi_hop_target_topic_overrides_rag_kg_classifier() -> None:
+    paper = {
+        "title": "GFM-RAG: Graph Foundation Model for Retrieval Augmented Generation",
+        "abstract": (
+            "The method applies retrieval augmented generation on knowledge graphs "
+            "but does not focus on multi-hop graph reasoning tasks."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/gfm_rag.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "retrieval augmented generation knowledge graph traversal efficient RAG multi-hop question answering",
+        paper,
+        target_topic="Multi-hop Reasoning on Graphs",
+    )
+
+    assert subtype.label == "graph_retrieval_rag_adjacent"
+    assert _index()._topic_rejection_reason(
+        "retrieval augmented generation knowledge graph traversal efficient RAG multi-hop question answering",
+        paper,
+        target_topic="Multi-hop Reasoning on Graphs",
+    ) == ""
