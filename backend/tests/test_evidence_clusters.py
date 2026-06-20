@@ -453,6 +453,100 @@ def test_high_support_same_role_cluster_can_create_report_ready_synthesis() -> N
     assert claim_report_ready_reason(claim) == ""
 
 
+def test_counterfactual_treatment_effect_evidence_uses_topic_specific_cluster_key() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Treatment Paper A",
+            "treatment_effect_estimation",
+            "The paper estimates heterogeneous treatment effects under potential outcomes.",
+            source_subtype="treatment_effect_estimation",
+        ),
+        _evidence(
+            "ev_b1",
+            "Treatment Paper B",
+            "treatment_effect_estimation",
+            "The method predicts counterfactual outcomes for individual treatment effect estimation.",
+            source_subtype="treatment_effect_estimation",
+        ),
+        _evidence(
+            "ev_c1",
+            "Treatment Paper C",
+            "treatment_effect_estimation",
+            "The model studies causal effect estimation with counterfactual regression.",
+            source_subtype="treatment_effect_estimation",
+        ),
+        _evidence(
+            "ev_d1",
+            "Treatment Paper D",
+            "treatment_effect_estimation",
+            "The evaluation measures treatment effect estimation across potential outcome settings.",
+            source_subtype="treatment_effect_estimation",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+
+    assert clusters[0].label == "treatment-effect estimation protocol"
+    assert clusters[0].independent_paper_count == 4
+    assert len(report_ready) == 1
+    assert report_ready[0].supporting_source_subtype_paper_counts == {
+        "treatment_effect_estimation": 4
+    }
+
+
+def test_multi_hop_kgqa_evidence_uses_topic_specific_cluster_key() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "KGQA Paper A",
+            "graph_reasoning_benchmark",
+            "The system solves knowledge graph question answering through semantic parsing.",
+            source_subtype="kgqa_or_graph_reasoning",
+        ),
+        _evidence(
+            "ev_b1",
+            "KGQA Paper B",
+            "graph_reasoning_benchmark",
+            "The method generates logical form queries for graph question answering.",
+            source_subtype="kgqa_or_graph_reasoning",
+        ),
+        _evidence(
+            "ev_c1",
+            "KGQA Paper C",
+            "graph_reasoning_benchmark",
+            "The approach handles multi-hop question answering over knowledge graphs.",
+            source_subtype="kgqa_or_graph_reasoning",
+        ),
+        _evidence(
+            "ev_d1",
+            "KGQA Paper D",
+            "graph_reasoning_benchmark",
+            "The pipeline constructs executable queries for KGQA reasoning.",
+            source_subtype="kgqa_or_graph_reasoning",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+
+    assert clusters[0].label == "KGQA and semantic parsing pipeline"
+    assert clusters[0].independent_paper_count == 4
+    assert len(report_ready) == 1
+    assert report_ready[0].supporting_source_subtype_paper_counts == {
+        "kgqa_or_graph_reasoning": 4
+    }
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),

@@ -2251,6 +2251,47 @@ CLUSTER_HINTS: dict[str, tuple[str, ...]] = {
         "attack",
         "failure",
     ),
+    "treatment_effect_estimation_protocol": (
+        "treatment effect",
+        "heterogeneous treatment",
+        "causal effect",
+        "counterfactual outcome",
+        "counterfactual outcomes",
+        "counterfactual regression",
+        "potential outcome",
+        "potential outcomes",
+        "individual treatment",
+    ),
+    "counterfactual_identifiability_assumption": (
+        "identifiability",
+        "identifiable",
+        "ignorability",
+        "unobserved confounding",
+        "confounding",
+        "structural causal",
+        "acyclicity",
+        "assumption",
+    ),
+    "kgqa_semantic_parsing_pipeline": (
+        "knowledge graph question answering",
+        "kgqa",
+        "graph question answering",
+        "multi-hop question answering",
+        "semantic parsing",
+        "logical form",
+        "executable query",
+        "query graph",
+    ),
+    "path_composition_graph_reasoning": (
+        "multi-hop path",
+        "graph path",
+        "path reasoning",
+        "path search",
+        "graph traversal",
+        "knowledge graph reasoning",
+        "hop reasoning",
+        "multi-hop reasoning",
+    ),
 }
 
 CLUSTER_LABELS: dict[str, str] = {
@@ -2263,6 +2304,10 @@ CLUSTER_LABELS: dict[str, str] = {
     "uncertainty_probabilistic": "uncertainty and probabilistic modeling",
     "efficiency_scaling": "efficiency and scaling",
     "robustness_adversarial": "robustness and adversarial analysis",
+    "treatment_effect_estimation_protocol": "treatment-effect estimation protocol",
+    "counterfactual_identifiability_assumption": "counterfactual identifiability and assumptions",
+    "kgqa_semantic_parsing_pipeline": "KGQA and semantic parsing pipeline",
+    "path_composition_graph_reasoning": "path composition and graph traversal",
 }
 
 CLUSTER_STOPWORDS = {
@@ -2560,6 +2605,10 @@ def cluster_axis_phrase(label: str) -> str:
         "uncertainty and probabilistic modeling": "不确定性、概率假设、校准或分布建模",
         "efficiency and scaling": "效率、扩展性、成本控制或近似工程",
         "robustness and adversarial analysis": "鲁棒性、失败模式、对抗扰动或偏差分析",
+        "treatment-effect estimation protocol": "处理效应目标、反事实结果建模、异质效应评估或潜在结果假设",
+        "counterfactual identifiability and assumptions": "可识别性条件、结构因果假设、混杂处理或反事实查询约束",
+        "KGQA and semantic parsing pipeline": "KGQA 任务形式、语义解析、逻辑形式生成或可执行查询构造",
+        "path composition and graph traversal": "多跳路径组合、图遍历、关系链搜索或路径级推理控制",
     }.get(label, label)
 
 
@@ -2570,6 +2619,54 @@ def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
         "data_evaluation_engineering": ["evaluation_benchmark"],
         "principled_probabilistic_modeling": ["uncertainty_probabilistic"],
         "approximation_engineering": ["efficiency_scaling"],
+        "treatment_effect_estimation": [
+            "treatment_effect_estimation_protocol",
+            "evaluation_benchmark",
+            "counterfactual_identifiability_assumption",
+        ],
+        "counterfactual_benchmarking": [
+            "evaluation_benchmark",
+            "treatment_effect_estimation_protocol",
+        ],
+        "core_counterfactual_inference": [
+            "counterfactual_identifiability_assumption",
+            "treatment_effect_estimation_protocol",
+        ],
+        "identifiability_assumption_sensitivity": [
+            "counterfactual_identifiability_assumption",
+        ],
+        "temporal_counterfactual_estimation": [
+            "treatment_effect_estimation_protocol",
+            "counterfactual_identifiability_assumption",
+        ],
+        "graph_reasoning_benchmark": [
+            "evaluation_benchmark",
+            "kgqa_semantic_parsing_pipeline",
+            "path_composition_graph_reasoning",
+        ],
+        "kgqa_or_graph_reasoning": [
+            "kgqa_semantic_parsing_pipeline",
+            "path_composition_graph_reasoning",
+            "modular_system_pipeline",
+        ],
+        "core_multi_hop_graph_reasoning": [
+            "path_composition_graph_reasoning",
+            "kgqa_semantic_parsing_pipeline",
+            "modular_system_pipeline",
+        ],
+        "semantic_parsing_grounding": [
+            "kgqa_semantic_parsing_pipeline",
+            "representation_formalization",
+        ],
+        "path_composition_reasoning": [
+            "path_composition_graph_reasoning",
+            "kgqa_semantic_parsing_pipeline",
+        ],
+        "graph_retrieval_boundary": [
+            "path_composition_graph_reasoning",
+            "kgqa_semantic_parsing_pipeline",
+            "modular_system_pipeline",
+        ],
     }.get(ev.dimension, [])
     for key in preferred_keys:
         hints = CLUSTER_HINTS.get(key, ())

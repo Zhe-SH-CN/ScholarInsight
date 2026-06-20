@@ -105,3 +105,28 @@ def test_quality_diagnostics_separates_audit_verified_from_report_ready() -> Non
         "no_report_ready_verified_synthesis",
         "audit_verified_claims_not_report_ready",
     ]
+
+
+def test_claim_row_exports_report_ready_reason() -> None:
+    audit = _audit_module()
+    claim = SimpleNamespace(
+        model_dump=lambda **_: {
+            "claim_id": "claim_audit_only",
+            "claim_type": "comparative",
+        },
+        verification_status="verified",
+        risk_level="low",
+        backlog_reason="",
+        claim_type="comparative",
+        source_paper_count=2,
+        supporting_evidence_ids=["ev_a", "ev_b"],
+        evidence_support_level="strong",
+        supporting_source_subtypes=["scientific_reasoning_benchmark"],
+        claim="作为跨论文对比性观察，这只说明当前样本内的机制差异，不单独构成领域趋势。",
+        final_wording="",
+    )
+
+    row = audit.claim_row(claim)
+
+    assert row["report_ready_rejection_reason"] == "sample_limited_observation"
+    assert row["is_report_ready"] is False

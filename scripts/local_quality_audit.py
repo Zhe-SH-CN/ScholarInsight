@@ -127,6 +127,13 @@ def source_row(candidate: Any) -> dict[str, Any]:
     }
 
 
+def claim_row(claim: Any) -> dict[str, Any]:
+    row = claim.model_dump(mode="json")
+    row["report_ready_rejection_reason"] = claim_report_ready_reason(claim)
+    row["is_report_ready"] = not row["report_ready_rejection_reason"]
+    return row
+
+
 def ratio(count: int, total: int) -> float:
     if total <= 0:
         return 0.0
@@ -316,7 +323,7 @@ async def audit_topic(
             "mixed_role_verified": mixed_role_verified,
         },
         "quality_diagnostics": quality_diagnostics(accepted, evidence, claims),
-        "claims": [claim.model_dump(mode="json") for claim in claims],
+        "claims": [claim_row(claim) for claim in claims],
         "clusters": [cluster.model_dump(mode="json") for cluster in clusters],
     }
 
