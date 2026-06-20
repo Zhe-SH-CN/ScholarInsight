@@ -411,6 +411,79 @@ def test_counterexample_audit_rows_challenge_boundaries_without_supporting_claim
     assert rows[0].audit_role == "rejected_source_boundary"
     assert "source gate rejected it" in rows[0].audit_only_reason
     assert "只挑战适用边界，不提供正向支撑" in rows[0].boundary_challenge
+    assert rows[0].report_visible is True
+    assert rows[0].semantic_quality >= 0.45
+
+
+def test_counterexample_audit_demotes_metadata_noise_from_report_table() -> None:
+    request = ResearchRequest(
+        project_name="Counterexample quality regression",
+        target_topic="Mathematical Reasoning",
+        analysis_dimensions=["formal_proof_symbolic_reasoning"],
+    )
+    claim = _report_ready_claim().model_copy(
+        update={
+            "claim_id": "claim_math_formal",
+            "dimension": "formal_proof_symbolic_reasoning",
+            "dimension_label": "形式证明与符号推理",
+            "evidence_cluster_label": "mathematical proof verification protocol",
+            "supporting_source_subtypes": ["formal_math_proving"],
+            "supporting_source_subtype_counts": {"formal_math_proving": 4},
+            "supporting_source_subtype_paper_counts": {"formal_math_proving": 4},
+        }
+    )
+    metadata_noise = SourceCandidate(
+        url="/papers/random_metadata.pdf",
+        title="5ck9PIrTpH",
+        query="mathematical reasoning proof verification",
+        relevance_label="reject",
+        rejection_reason="non-informative paper title metadata",
+        relevance_score=0.0,
+        source_subtype="mathematical_reasoning_adjacent",
+    )
+    proceedings_header = SourceCandidate(
+        url="/papers/proceedings_header.pdf",
+        title="Proceedings of the 63rd Annual Meeting of the Association for Computational Linguistics (Volume",
+        query="mathematical reasoning proof verification",
+        relevance_label="reject",
+        rejection_reason="Mathematical reasoning query requires LLM plus mathematical reasoning/proof signal",
+        relevance_score=0.0,
+        source_subtype="formal_math_proving",
+    )
+    hard_negative = SourceCandidate(
+        url="/papers/proofbridge.pdf",
+        title="PROOFBRIDGE: Auto-Formalization of Natural Language Proofs in Lean via Joint Embeddings",
+        snippet="Auto-formalization proof verification protocol in Lean.",
+        query="mathematical reasoning proof verification Lean benchmark",
+        relevance_label="reject",
+        rejection_reason="Mathematical reasoning query requires LLM plus mathematical reasoning/proof signal",
+        relevance_score=0.0,
+        source_subtype="mathematical_reasoning_adjacent",
+        source_subtype_reason="formal proof adjacent source without explicit LLM mathematical reasoning framing",
+    )
+
+    rows = pipeline_module.build_counterexample_audit_rows(
+        request,
+        [claim],
+        [metadata_noise, proceedings_header, hard_negative],
+    )
+
+    by_title = {row.source_title: row for row in rows}
+    assert by_title["5ck9PIrTpH"].counterexample_type == "metadata_noise"
+    assert by_title["5ck9PIrTpH"].report_visible is False
+    assert by_title["5ck9PIrTpH"].semantic_quality < 0.2
+    assert by_title[proceedings_header.title].counterexample_type == "metadata_noise"
+    assert by_title[proceedings_header.title].report_visible is False
+    assert by_title[hard_negative.title].counterexample_type in {
+        "hard_negative_boundary",
+        "adjacent_boundary",
+    }
+    assert by_title[hard_negative.title].report_visible is True
+
+    section = "\n".join(pipeline_module.build_counterexample_audit_section(rows, [claim]))
+    assert "PROOFBRIDGE" in section
+    assert "5ck9PIrTpH" not in section
+    assert "metadata/noise row 已从下表降级" in section
 
 
 def test_analysis_report_renders_counterexample_audit_as_audit_only_section() -> None:

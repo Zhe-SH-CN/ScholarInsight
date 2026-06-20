@@ -4127,7 +4127,7 @@ def build_analysis_report(
         "",
         "## 反例与负结果审计",
         "",
-        *build_counterexample_audit_section(counterexample_audit),
+        *build_counterexample_audit_section(counterexample_audit, sorted_report_ready_claims(claims)),
         "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
@@ -4740,76 +4740,102 @@ def build_counterexample_audit_rows(
 
     selected_urls = {normalize_reference_url(url) for url in (selected_source_urls or [])}
     scored_rows: list[tuple[float, CounterexampleAuditRow]] = []
-    seen_sources: set[str] = set()
     for candidate in candidates:
         normalized_url = normalize_reference_url(candidate.url)
         audit_role = counterexample_audit_role(candidate, normalized_url in selected_urls)
-        if not audit_role or normalized_url in seen_sources:
+        if not audit_role:
             continue
-        claim, match_score = best_counterexample_target_claim(candidate, ready_claims)
-        if not claim:
-            continue
-        axis = (
-            cluster_axis_phrase(claim.evidence_cluster_label)
-            if claim.evidence_cluster_label
-            else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
-        )
-        audit_reason = counterexample_audit_only_reason(candidate, audit_role)
-        row = CounterexampleAuditRow(
-            audit_id=stable_id(
-                "cex",
-                f"{request.target_topic}:{claim.claim_id}:{candidate.url}:{candidate.source_subtype}:{audit_role}",
-            ),
-            target_claim_id=claim.claim_id,
-            target_dimension=claim.dimension,
-            target_dimension_label=DIMENSION_LABELS.get(claim.dimension, claim.dimension_label),
-            target_axis=axis,
-            source_title=candidate.title or candidate.url,
-            source_url=candidate.url,
-            source_subtype=candidate.source_subtype or "unclassified",
-            source_subtype_reason=candidate.source_subtype_reason,
-            relevance_score=round(min(1.0, max(0.0, candidate.relevance_score)), 4),
-            relevance_label=candidate.relevance_label,
-            rejection_reason=candidate.rejection_reason,
-            query=candidate.query,
-            audit_role=audit_role,
-            boundary_challenge=counterexample_boundary_challenge(request, claim, candidate, audit_role),
-            audit_only_reason=audit_reason,
-        )
-        priority = (
-            match_score
-            + candidate.relevance_score
-            + (0.35 if candidate.rejection_reason else 0)
-            + (0.25 if (candidate.source_subtype or "") not in SYNTHESIS_SOURCE_ROLES else 0)
-        )
-        scored_rows.append((priority, row))
-        seen_sources.add(normalized_url)
+        for claim in ready_claims:
+            match_score = counterexample_match_score(candidate, claim)
+            if match_score <= 0 and candidate.relevance_score < 0.25:
+                continue
+            axis = (
+                cluster_axis_phrase(claim.evidence_cluster_label)
+                if claim.evidence_cluster_label
+                else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+            )
+            audit_reason = counterexample_audit_only_reason(candidate, audit_role)
+            counterexample_type, semantic_quality, quality_reason, report_visible = counterexample_quality_assessment(
+                candidate,
+                audit_role,
+                match_score,
+            )
+            row = CounterexampleAuditRow(
+                audit_id=stable_id(
+                    "cex",
+                    f"{request.target_topic}:{claim.claim_id}:{candidate.url}:{candidate.source_subtype}:{audit_role}",
+                ),
+                target_claim_id=claim.claim_id,
+                target_dimension=claim.dimension,
+                target_dimension_label=DIMENSION_LABELS.get(claim.dimension, claim.dimension_label),
+                target_axis=axis,
+                source_title=candidate.title or candidate.url,
+                source_url=candidate.url,
+                source_subtype=candidate.source_subtype or "unclassified",
+                source_subtype_reason=candidate.source_subtype_reason,
+                relevance_score=round(min(1.0, max(0.0, candidate.relevance_score)), 4),
+                relevance_label=candidate.relevance_label,
+                rejection_reason=candidate.rejection_reason,
+                query=candidate.query,
+                audit_role=audit_role,
+                counterexample_type=counterexample_type,
+                semantic_quality=semantic_quality,
+                quality_reason=quality_reason,
+                report_visible=report_visible,
+                boundary_challenge=counterexample_boundary_challenge(request, claim, candidate, audit_role),
+                audit_only_reason=audit_reason,
+            )
+            priority = (
+                semantic_quality * 2
+                + match_score
+                + candidate.relevance_score
+                + (0.35 if candidate.rejection_reason else 0)
+                + (0.25 if (candidate.source_subtype or "") not in SYNTHESIS_SOURCE_ROLES else 0)
+            )
+            scored_rows.append((priority, row))
 
-    return [
-        row
-        for _, row in sorted(
-            scored_rows,
-            key=lambda item: (item[0], item[1].relevance_score, item[1].source_title),
-            reverse=True,
-        )[:limit]
-    ]
-
-
-def counterexample_audit_role(candidate: SourceCandidate, selected_for_synthesis: bool) -> str:
-    subtype = candidate.source_subtype or "unclassified"
-    if candidate.relevance_label == "reject" or candidate.rejection_reason:
-        return "rejected_source_boundary"
-    if subtype and subtype not in SYNTHESIS_SOURCE_ROLES:
-        return "adjacent_source_boundary" if not selected_for_synthesis else "selected_non_reportable_boundary"
-    return ""
+    return select_counterexample_audit_rows(scored_rows, ready_claims, limit)
 
 
-def best_counterexample_target_claim(
-    candidate: SourceCandidate,
+def select_counterexample_audit_rows(
+    scored_rows: list[tuple[float, CounterexampleAuditRow]],
     ready_claims: list[Claim],
-) -> tuple[Claim | None, float]:
-    if not ready_claims:
-        return None, 0.0
+    limit: int,
+) -> list[CounterexampleAuditRow]:
+    ranked = sorted(
+        scored_rows,
+        key=lambda item: (item[0], item[1].relevance_score, item[1].source_title),
+        reverse=True,
+    )
+    selected: list[CounterexampleAuditRow] = []
+    used_sources: set[str] = set()
+
+    for claim in ready_claims:
+        for _, row in ranked:
+            source_key = normalize_reference_url(row.source_url)
+            if (
+                row.target_claim_id == claim.claim_id
+                and row.report_visible
+                and source_key not in used_sources
+            ):
+                selected.append(row)
+                used_sources.add(source_key)
+                break
+        if len(selected) >= limit:
+            return selected
+
+    for _, row in ranked:
+        if len(selected) >= limit:
+            break
+        source_key = normalize_reference_url(row.source_url)
+        if source_key in used_sources:
+            continue
+        selected.append(row)
+        used_sources.add(source_key)
+    return selected
+
+
+def counterexample_match_score(candidate: SourceCandidate, claim: Claim) -> float:
     text = " ".join(
         [
             candidate.title,
@@ -4820,20 +4846,21 @@ def best_counterexample_target_claim(
             candidate.rejection_reason,
         ]
     ).lower()
-    best_claim = ready_claims[0]
-    best_score = -1.0
-    for claim in ready_claims:
-        terms = counterexample_target_terms(claim)
-        hits = sum(1 for term in terms if term in text)
-        score = hits / max(1, len(terms))
-        if candidate.source_subtype in (claim.supporting_source_subtypes or []):
-            score -= 0.2
-        if score > best_score:
-            best_claim = claim
-            best_score = score
-    if best_score <= 0 and candidate.relevance_score < 0.25:
-        return None, 0.0
-    return best_claim, max(0.0, best_score)
+    terms = counterexample_target_terms(claim)
+    hits = sum(1 for term in terms if term in text)
+    score = hits / max(1, len(terms))
+    if candidate.source_subtype in (claim.supporting_source_subtypes or []):
+        score -= 0.2
+    return max(0.0, score)
+
+
+def counterexample_audit_role(candidate: SourceCandidate, selected_for_synthesis: bool) -> str:
+    subtype = candidate.source_subtype or "unclassified"
+    if candidate.relevance_label == "reject" or candidate.rejection_reason:
+        return "rejected_source_boundary"
+    if subtype and subtype not in SYNTHESIS_SOURCE_ROLES:
+        return "adjacent_source_boundary" if not selected_for_synthesis else "selected_non_reportable_boundary"
+    return ""
 
 
 def counterexample_target_terms(claim: Claim) -> list[str]:
@@ -4865,6 +4892,91 @@ def counterexample_audit_only_reason(candidate: SourceCandidate, audit_role: str
     return f"audit-only {audit_role}; not used as supporting evidence"
 
 
+def counterexample_quality_assessment(
+    candidate: SourceCandidate,
+    audit_role: str,
+    match_score: float,
+) -> tuple[str, float, str, bool]:
+    title = (candidate.title or "").strip()
+    rejection = (candidate.rejection_reason or "").strip().lower()
+    subtype = candidate.source_subtype or "unclassified"
+    if is_metadata_noise_counterexample(candidate):
+        return (
+            "metadata_noise",
+            0.12,
+            "rejected source is dominated by non-informative title/metadata rather than a semantic boundary",
+            False,
+        )
+
+    title_terms = meaningful_title_terms(title)
+    score = 0.18
+    reasons: list[str] = []
+    if len(title_terms) >= 5:
+        score += 0.28
+        reasons.append("substantive paper title")
+    elif len(title_terms) >= 3:
+        score += 0.18
+        reasons.append("usable paper title")
+    if subtype and subtype != "unclassified":
+        score += 0.16
+        reasons.append(f"typed source role: {source_role_label(subtype)}")
+    if candidate.rejection_reason:
+        score += 0.12
+        reasons.append("explicit source-gate rejection reason")
+    if subtype not in SYNTHESIS_SOURCE_ROLES:
+        score += 0.16
+        reasons.append("non-reportable adjacent role")
+    if match_score > 0:
+        score += min(0.18, match_score * 0.8)
+        reasons.append("shares target-axis terms")
+    if audit_role == "selected_non_reportable_boundary":
+        score += 0.06
+        reasons.append("selected but non-reportable")
+
+    semantic_quality = round(min(0.95, max(0.0, score)), 3)
+    if semantic_quality >= 0.64:
+        counterexample_type = "hard_negative_boundary"
+    elif semantic_quality >= 0.45:
+        counterexample_type = "adjacent_boundary"
+    else:
+        counterexample_type = "weak_boundary"
+    report_visible = semantic_quality >= 0.45 and counterexample_type != "metadata_noise"
+    quality_reason = "; ".join(reasons) or "weak semantic boundary"
+    return counterexample_type, semantic_quality, quality_reason, report_visible
+
+
+def is_metadata_noise_counterexample(candidate: SourceCandidate) -> bool:
+    title = (candidate.title or "").strip()
+    lowered_reason = (candidate.rejection_reason or "").lower()
+    lowered_title = title.lower()
+    if "non-informative paper title metadata" in lowered_reason:
+        return True
+    if (
+        lowered_title.startswith("proceedings of the")
+        or lowered_title.startswith("findings of the")
+        or "annual meeting of the association for computational linguistics" in lowered_title
+    ):
+        return True
+    terms = meaningful_title_terms(title)
+    if len(terms) <= 1:
+        return True
+    if re.fullmatch(r"[A-Za-z0-9_-]{8,14}", title) and not any(ch in title for ch in " -_:"):
+        return True
+    if title.lower() in {"data", "abstract", "references", "appendix"}:
+        return True
+    return False
+
+
+def meaningful_title_terms(title: str) -> list[str]:
+    terms: list[str] = []
+    for token in re.findall(r"[A-Za-z][A-Za-z0-9+_-]{2,}", title):
+        lower = token.lower()
+        if lower in CLUSTER_STOPWORDS or lower in {"from", "abstract", "contextual"}:
+            continue
+        terms.append(token)
+    return terms
+
+
 def counterexample_boundary_challenge(
     request: ResearchRequest,
     claim: Claim,
@@ -4893,23 +5005,45 @@ def counterexample_boundary_challenge(
     )
 
 
-def build_counterexample_audit_section(rows: list[CounterexampleAuditRow], limit: int = 8) -> list[str]:
+def build_counterexample_audit_section(
+    rows: list[CounterexampleAuditRow],
+    ready_claims: list[Claim] | None = None,
+    limit: int = 8,
+) -> list[str]:
     if not rows:
         return [
             "当前尚未形成独立 counterexample source audit；下一轮应检索与 report-ready claim 共享关键词但被 source gate 拒绝或属于相邻 source role 的论文。",
             "这些 source 只用于挑战命题边界，不进入 Evidence extraction、Claim synthesis 或 `g(c)` 证据证书。",
         ]
 
+    visible_rows = [row for row in rows if row.report_visible and row.semantic_quality >= 0.45]
+    metadata_noise_count = len([row for row in rows if row.counterexample_type == "metadata_noise" or not row.report_visible])
+    ready_claims = ready_claims or []
+    target_claim_ids = {claim.claim_id for claim in ready_claims}
+    covered_claim_ids = {row.target_claim_id for row in visible_rows}
+    coverage_total = len(target_claim_ids) or len({row.target_claim_id for row in rows})
+    coverage_hit = len(covered_claim_ids & target_claim_ids) if target_claim_ids else len(covered_claim_ids)
+
     lines = [
         "以下来源用于挑战 report-ready 命题的适用边界；它们是 audit-only rows，不进入 Evidence extraction、Claim synthesis 或 `g(c)` 证据证书。",
+        f"Hard-negative coverage：{coverage_hit}/{coverage_total} 条 report-ready claim 至少有 1 个语义反例；"
+        f"{metadata_noise_count} 条 metadata/noise row 已从下表降级，仅保留在 `exports/counterexample_audit.json`。",
         "",
-        "| 挑战对象 | audit-only source | 类型 | relevance | 拒绝/审计原因 | 边界挑战 |",
-        "|---|---|---|---|---|---|",
     ]
-    for row in rows[:limit]:
+    if not visible_rows:
+        lines.append("当前没有达到语义质量阈值的 hard-negative source；不应把 metadata 噪声写成反例支撑。")
+        return lines
+
+    lines.extend(
+        [
+            "| 挑战对象 | audit-only source | 类型 | semantic quality | 拒绝/审计原因 | 边界挑战 |",
+            "|---|---|---|---|---|---|",
+        ]
+    )
+    for row in visible_rows[:limit]:
         source = f"{compact_fact(row.source_title, 72)} ({row.source_url})"
         target = f"{row.target_dimension_label} / {compact_fact(row.target_axis, 60)}"
-        reason = row.audit_only_reason or row.rejection_reason or row.source_subtype_reason
+        reason = row.quality_reason or row.audit_only_reason or row.rejection_reason or row.source_subtype_reason
         lines.append(
             "|"
             + "|".join(
@@ -4917,8 +5051,8 @@ def build_counterexample_audit_section(rows: list[CounterexampleAuditRow], limit
                 for value in [
                     target,
                     source,
-                    row.audit_role,
-                    f"{row.relevance_score:.2f}",
+                    row.counterexample_type,
+                    f"{row.semantic_quality:.2f}",
                     compact_fact(reason, 120),
                     compact_fact(row.boundary_challenge, 150),
                 ]

@@ -434,6 +434,10 @@ class CounterexampleAuditRow(BaseModel):
     rejection_reason: str = ""
     query: str = ""
     audit_role: str = "boundary_challenge"
+    counterexample_type: str = "manual_boundary"
+    semantic_quality: float = Field(default=1.0, ge=0, le=1)
+    quality_reason: str = ""
+    report_visible: bool = True
     boundary_challenge: str = ""
     audit_only_reason: str = ""
 

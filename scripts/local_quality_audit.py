@@ -306,6 +306,8 @@ async def audit_topic(
         candidates,
         selected_source_urls=[item.url for item in selected],
     )
+    counterexample_types = Counter(row.counterexample_type for row in counterexample_audit)
+    counterexample_visible_count = sum(1 for row in counterexample_audit if row.report_visible)
 
     claim_statuses = Counter(claim.verification_status for claim in claims)
     claim_types = Counter(claim.claim_type for claim in claims)
@@ -340,6 +342,12 @@ async def audit_topic(
             "mixed_role_verified": mixed_role_verified,
         },
         "quality_diagnostics": quality_diagnostics(accepted, evidence, claims),
+        "counterexample_audit_summary": {
+            "row_count": len(counterexample_audit),
+            "report_visible_count": counterexample_visible_count,
+            "counterexample_types": counterexample_types,
+            "metadata_noise_count": counterexample_types.get("metadata_noise", 0),
+        },
         "counterexample_audit": [row.model_dump(mode="json") for row in counterexample_audit],
         "claims": [claim_row(claim) for claim in claims],
         "clusters": [cluster.model_dump(mode="json") for cluster in clusters],
