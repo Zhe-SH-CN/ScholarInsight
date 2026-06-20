@@ -2623,6 +2623,33 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
         claims.append(claim)
         if len(claims) >= limit:
             break
+    if len(claims) < limit:
+        for cluster in candidate_clusters:
+            supporting, source_roles = select_cross_role_synthesis_support(cluster, by_id)
+            if len(supporting) < 4 or len(source_roles) < 2:
+                continue
+            paper_count = len({paper_key(ev) for ev in supporting})
+            if paper_count < 4:
+                continue
+            claim_text = cross_role_report_ready_synthesis_text(cluster, supporting, source_roles)
+            reasoning = (
+                "该 cross-role synthesis 只比较不同 source role 在同一证据轴上的分工，"
+                f"覆盖 {paper_count} 篇独立论文。"
+            )
+            claim = build_claim_from_support(
+                run_id,
+                cluster.dimension,
+                cluster.dimension_label,
+                claim_text,
+                supporting,
+                reasoning,
+            )
+            claim.claim_type = "cross_role_contrast"
+            claim.evidence_cluster_id = cluster.cluster_id
+            claim.evidence_cluster_label = cluster.label
+            claims.append(claim)
+            if len(claims) >= limit:
+                break
     return claims
 
 
@@ -2673,6 +2700,61 @@ def report_ready_synthesis_text(cluster: EvidenceCluster, source_role_label: str
         f"共同围绕“{cluster.label}”这一分析轴组织证据，主要体现在{axis}。"
         f"该结论限定于同一 source role 内的多论文证据，可作为报告主体中的范围限定综合结论。"
     )
+
+
+def cross_role_report_ready_synthesis_text(
+    cluster: EvidenceCluster,
+    supporting: list[Evidence],
+    source_roles: list[str],
+) -> str:
+    role_counts = claim_source_role_paper_counts(supporting)
+    role_parts = []
+    for role in source_roles:
+        role_parts.append(
+            f"{source_role_label(role)} 来源（{role_counts.get(role, 0)} 篇）侧重"
+            f"{source_role_contribution_phrase(role, cluster.label)}"
+        )
+    axis = cluster_axis_phrase(cluster.label)
+    return (
+        f"在{cluster.dimension_label}维度，{len({paper_key(ev) for ev in supporting})} 篇论文"
+        f"共同围绕“{cluster.label}”形成来源角色分工对照："
+        f"{'；'.join(role_parts)}。"
+        f"该结论限定于{axis}这一证据轴，可作为报告主体中的范围限定综合结论。"
+    )
+
+
+def source_role_contribution_phrase(role: str, cluster_label: str) -> str:
+    if role == "scientific_reasoning_benchmark":
+        return "任务定义、数据集构造和评测协议"
+    if role == "scientific_discovery_agent":
+        return "agent workflow、工具调用和研究流程编排"
+    if role == "core_scientific_reasoning_method":
+        return "科学推理机制、领域知识整合和方法设计"
+    if role == "scientific_equation_discovery":
+        return "方程发现、符号回归和科学规律抽取"
+    if role == "core_counterfactual_inference":
+        return "结构因果假设、反事实查询和可识别性条件"
+    if role == "treatment_effect_estimation":
+        return "处理效应目标、潜在结果建模和异质效应估计"
+    if role == "counterfactual_explanation_or_fairness":
+        return "反事实解释、recourse 和公平性约束"
+    if role == "math_reasoning_benchmark":
+        return "数学题集、评测协议和错误模式测量"
+    if role == "formal_math_proving":
+        return "形式证明、证明检查和符号验证"
+    if role == "math_training_data":
+        return "数学训练数据、合成题和扩展调优"
+    if role == "kgqa_or_graph_reasoning":
+        return "KGQA、语义解析和可执行查询构造"
+    if role == "core_multi_hop_graph_reasoning":
+        return "多跳路径组合、图遍历和关系链推理"
+    if role == "graph_reasoning_benchmark":
+        return "图推理任务定义、数据集和评测指标"
+    if role == "core_kg_rag_method":
+        return "KG-RAG 架构、图检索和生成增强机制"
+    if role == "benchmark_or_analysis":
+        return "基准分析、适用条件和对照评测"
+    return f"{cluster_axis_phrase(cluster_label)}相关证据"
 
 
 def cluster_axis_phrase(label: str) -> str:
@@ -2907,6 +2989,52 @@ def select_synthesis_support(cluster: EvidenceCluster, by_id: dict[str, Evidence
     return [], ""
 
 
+def select_cross_role_synthesis_support(
+    cluster: EvidenceCluster,
+    by_id: dict[str, Evidence],
+) -> tuple[list[Evidence], list[str]]:
+    if cluster.label.startswith("lexical_"):
+        return [], []
+    items = [by_id[ev_id] for ev_id in cluster.evidence_ids if ev_id in by_id]
+    by_role: dict[str, list[Evidence]] = defaultdict(list)
+    for item in items:
+        role = item.source_subtype or "unclassified"
+        if role not in SYNTHESIS_SOURCE_ROLES:
+            continue
+        by_role[role].append(item)
+    eligible_roles = [
+        role
+        for role, role_items in by_role.items()
+        if len({paper_key(ev) for ev in role_items}) >= 2
+    ]
+    if len(eligible_roles) < 2:
+        return [], []
+    ranked_roles = sorted(
+        eligible_roles,
+        key=lambda role: (
+            len({paper_key(ev) for ev in by_role[role]}),
+            len(by_role[role]),
+            average([ev.confidence for ev in by_role[role]]),
+        ),
+        reverse=True,
+    )[:3]
+    supporting: list[Evidence] = []
+    for role in ranked_roles:
+        role_items = sorted(by_role[role], key=lambda ev: ev.confidence, reverse=True)
+        by_paper: dict[str, list[Evidence]] = defaultdict(list)
+        for item in role_items:
+            by_paper[paper_key(item)].append(item)
+        for paper in sorted(
+            by_paper,
+            key=lambda name: average([ev.confidence for ev in by_paper[name]]),
+            reverse=True,
+        )[:2]:
+            supporting.append(sorted(by_paper[paper], key=lambda ev: ev.confidence, reverse=True)[0])
+    if not cluster_supports_report_ready_synthesis(cluster, supporting):
+        return [], []
+    return supporting, ranked_roles
+
+
 def cluster_summary(items: list[Evidence]) -> str:
     if not items:
         return ""
@@ -3022,15 +3150,21 @@ def prepare_claims_for_review(claims: list[Claim], evidence: list[Evidence]) -> 
             continue
         if paper_count >= 2 and len(reportable_roles) > 1:
             claim.claim_type = "cross_role_contrast"
-            claim.claim = role_contrast_text(claim, supporting, reportable_roles)
+            scoped_cross_role = (
+                "来源角色分工对照" in claim.claim
+                and "范围限定综合结论" in claim.claim
+            )
+            if not scoped_cross_role:
+                claim.claim = role_contrast_text(claim, supporting, reportable_roles)
             claim.final_wording = claim.claim
             claim.reasoning_summary = (
                 f"{claim.reasoning_summary} Role-aware rewrite: this claim contrasts "
                 f"{', '.join(source_role_label(role) for role in sorted(reportable_roles))} "
                 "instead of treating mixed source roles as one field-wide trend."
             ).strip()
-            claim.confidence = min(claim.confidence, 0.72)
-            claim.risk_level = "medium"
+            if not scoped_cross_role:
+                claim.confidence = min(claim.confidence, 0.72)
+                claim.risk_level = "medium"
             claim.backlog_reason = ""
         elif paper_count >= 2:
             claim.claim_type = "comparative"

@@ -697,6 +697,59 @@ def test_scientific_cluster_keys_do_not_override_non_scientific_dimensions() -> 
     }
 
 
+def test_scientific_workflow_cluster_can_create_cross_role_report_ready_contrast() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Benchmark Paper A",
+            "lab_workflow_reasoning",
+            "The benchmark defines hypothesis generation and experimental design tasks.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Benchmark Paper B",
+            "lab_workflow_reasoning",
+            "The benchmark organizes data-driven discovery workflow stages from hypothesis generation to experiment design.",
+            source_subtype="scientific_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_c1",
+            "Agent Paper C",
+            "tool_augmented_scientific_reasoning",
+            "The multi-agent architecture coordinates scientific discovery workflow actions.",
+            source_subtype="scientific_discovery_agent",
+        ),
+        _evidence(
+            "ev_d1",
+            "Agent Paper D",
+            "domain_grounding_verification",
+            "The agent orchestrates hypothesis generation and experiment planning.",
+            source_subtype="scientific_discovery_agent",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = deterministic_red_team(
+        build_claims_from_clusters("run_test", clusters, evidence, limit=8),
+        evidence,
+    )
+    report_ready = [claim for claim in claims if is_report_ready_claim(claim)]
+    cross_role = [claim for claim in report_ready if claim.claim_type == "cross_role_contrast"]
+
+    assert len(cross_role) == 1
+    claim = cross_role[0]
+    assert claim_report_ready_reason(claim) == ""
+    assert claim.source_paper_count == 4
+    assert claim.supporting_source_subtype_paper_counts == {
+        "scientific_discovery_agent": 2,
+        "scientific_reasoning_benchmark": 2,
+    }
+    assert "来源角色分工对照" in claim.claim
+    assert "scientific discovery agent/workflow" in claim.claim
+    assert "scientific reasoning benchmark" in claim.claim
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),
