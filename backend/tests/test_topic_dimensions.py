@@ -51,3 +51,27 @@ def test_dimensions_for_multi_hop_graphs_and_label_normalization() -> None:
         normalize_dimension_key("N/A", "multi-hop graph reasoning semantic parsing over knowledge graphs")
         == "semantic_parsing_grounding"
     )
+
+
+def test_normalize_counterfactual_dimension_aliases() -> None:
+    assert (
+        normalize_dimension_key(
+            "counterfactual_benchmark_evaluation",
+            "benchmark metrics datasets evaluation protocol for counterfactual prediction",
+        )
+        == "counterfactual_benchmarking"
+    )
+    assert (
+        normalize_dimension_key(
+            "counterfactual_explanation_and_fairness",
+            "algorithmic recourse and counterfactual fairness",
+        )
+        == "counterfactual_explanation_fairness"
+    )
+    assert (
+        normalize_dimension_key(
+            "identifiability_and_assumption_sensitivity",
+            "identifiability assumptions sensitivity analysis",
+        )
+        == "identifiability_assumption_sensitivity"
+    )

@@ -1256,10 +1256,11 @@ class AnalysisAndReviewAgent(BaseAgent):
             else:
                 claim_type = "backlog"  # 仅1条证据 → 进入补证队列
 
-            dimension = str(row.get("dimension") or "other")
             claim_text = str(row.get("claim") or "").strip()
             if len(claim_text) < 12:
                 continue
+            reasoning_summary = str(row.get("reasoning_summary") or "由 LLM 基于 Evidence 聚合生成。")
+            dimension = normalize_dimension_key(row.get("dimension"), f"{claim_text} {reasoning_summary}")
             confidence = clamp_float(row.get("confidence"), 0.45, 0.95)
             if claim_type == "backlog":
                 confidence = min(confidence, 0.55)
@@ -1283,7 +1284,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                     supporting_evidence_ids=supporting,
                     confidence=confidence,
                     risk_level="medium",
-                    reasoning_summary=str(row.get("reasoning_summary") or "由 LLM 基于 Evidence 聚合生成。"),
+                    reasoning_summary=reasoning_summary,
                     claim_type=claim_type,
                     source_paper_count=len(supporting_papers),
                     evidence_support_level=support_level,
@@ -2885,6 +2886,13 @@ DIMENSION_HINTS: dict[str, tuple[str, ...]] = {
     "graph_retrieval_boundary": ("graph retrieval", "rag adjacent", "retrieval boundary"),
 }
 
+DIMENSION_ALIASES: dict[str, str] = {
+    "counterfactual_benchmark_evaluation": "counterfactual_benchmarking",
+    "counterfactual_explanation_and_fairness": "counterfactual_explanation_fairness",
+    "counterfactual_explanation_or_fairness": "counterfactual_explanation_fairness",
+    "identifiability_and_assumption_sensitivity": "identifiability_assumption_sensitivity",
+}
+
 
 def normalize_dimension_key(value: Any, context: str = "") -> str:
     raw = str(value or "").strip()
@@ -2892,6 +2900,10 @@ def normalize_dimension_key(value: Any, context: str = "") -> str:
         return raw
 
     lower_raw = raw.lower()
+    alias = DIMENSION_ALIASES.get(lower_raw)
+    if alias:
+        return alias
+
     for key, label in DIMENSION_LABELS.items():
         if lower_raw == key.lower() or raw == label:
             return key
