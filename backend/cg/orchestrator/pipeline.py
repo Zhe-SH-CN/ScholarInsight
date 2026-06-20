@@ -1344,6 +1344,7 @@ class ResearchPipeline:
             deterministic_claims,
             request,
         )
+        claims = prepare_claims_for_review(claims, evidence)
         return claims
 
     async def red_team(
@@ -2353,6 +2354,74 @@ def claim_source_role_counts(supporting: list[Evidence]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def source_role_label(role: str) -> str:
+    return SOURCE_ROLE_LABELS.get(role, role.replace("_", " "))
+
+
+def role_contrast_text(claim: Claim, supporting: list[Evidence], reportable_roles: set[str]) -> str:
+    parts: list[str] = []
+    for role in sorted(reportable_roles):
+        role_items = sorted(
+            [ev for ev in supporting if ev.source_subtype == role],
+            key=lambda ev: ev.confidence,
+            reverse=True,
+        )
+        if not role_items:
+            continue
+        papers = unique_strings([paper_key(ev) for ev in role_items])[:2]
+        best_fact = compact_fact(role_items[0].fact, 110)
+        paper_text = f"（{'; '.join(papers)}）" if papers else ""
+        parts.append(f"{source_role_label(role)}{paper_text}侧重{best_fact}")
+    if not parts:
+        return claim.claim
+    return (
+        f"作为跨 source-role 对照，{claim.dimension_label}维度中，"
+        f"{'；'.join(parts)}。"
+        "这只比较 benchmark/core/testbed 等来源角色的证据分工，不作为统一领域趋势。"
+    )
+
+
+def prepare_claims_for_review(claims: list[Claim], evidence: list[Evidence]) -> list[Claim]:
+    by_id = {ev.evidence_id: ev for ev in evidence}
+    for claim in claims:
+        supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
+        paper_count = len({paper_key(ev) for ev in supporting})
+        source_roles = {ev.source_subtype for ev in supporting if ev.source_subtype}
+        reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
+        source_role_counts = claim_source_role_counts(supporting)
+        claim.source_paper_count = paper_count
+        claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
+        claim.supporting_source_subtypes = sorted(source_role_counts)
+        claim.supporting_source_subtype_counts = source_role_counts
+        if len(supporting) < 2:
+            claim.claim_type = "backlog"
+            claim.backlog_reason = "single_evidence_claim"
+            claim.confidence = min(claim.confidence, 0.55)
+            continue
+        if source_roles and not source_roles.issubset(SYNTHESIS_SOURCE_ROLES):
+            claim.claim_type = "backlog"
+            claim.backlog_reason = "unsupported_source_role"
+            claim.confidence = min(claim.confidence, 0.55)
+            continue
+        if paper_count >= 2 and len(reportable_roles) > 1:
+            claim.claim_type = "cross_role_contrast"
+            claim.claim = role_contrast_text(claim, supporting, reportable_roles)
+            claim.final_wording = claim.claim
+            claim.reasoning_summary = (
+                f"{claim.reasoning_summary} Role-aware rewrite: this claim contrasts "
+                f"{', '.join(source_role_label(role) for role in sorted(reportable_roles))} "
+                "instead of treating mixed source roles as one field-wide trend."
+            ).strip()
+            claim.confidence = min(claim.confidence, 0.72)
+            claim.risk_level = "medium"
+            claim.backlog_reason = ""
+        elif paper_count >= 2:
+            claim.claim_type = "comparative"
+        else:
+            claim.claim_type = "single_paper_observation"
+    return claims
+
+
 def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> list[Claim]:
     by_id = {ev.evidence_id: ev for ev in evidence}
     for claim in claims:
@@ -2365,7 +2434,9 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
         claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
         claim.supporting_source_subtypes = sorted(source_role_counts)
         claim.supporting_source_subtype_counts = source_role_counts
-        if paper_count >= 2:
+        if claim.claim_type == "cross_role_contrast" and paper_count >= 2:
+            claim.claim_type = "cross_role_contrast"
+        elif paper_count >= 2:
             claim.claim_type = "comparative"
         elif len(supporting) >= 2:
             claim.claim_type = "single_paper_observation"
@@ -2379,6 +2450,8 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
             backlog_reason = "comparative_claim_without_independent_papers"
         elif source_roles and not source_roles.issubset(SYNTHESIS_SOURCE_ROLES):
             backlog_reason = "unsupported_source_role"
+        elif claim.claim_type == "cross_role_contrast" and len(reportable_roles) < 2:
+            backlog_reason = "invalid_cross_role_contrast"
         elif claim.claim_type == "comparative" and len(reportable_roles) != 1:
             backlog_reason = "mixed_source_roles"
         elif claim.verification_status in {"needs_evidence", "challenged", "rejected"}:

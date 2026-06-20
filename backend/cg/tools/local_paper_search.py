@@ -1084,7 +1084,26 @@ class LocalPaperIndex:
                 "process rewards",
             )
         )
-        if causal_application_drift and not explicit_llm_causal_eval:
+        modality_application_drift = any(
+            marker in primary
+            for marker in (
+                "multimodal",
+                "mllm",
+                "mllms",
+                "vision-based",
+                "vision based",
+                "vision-language",
+                "vision language",
+                "video reasoning",
+                "video understanding",
+                "dash-cam",
+                "dashcam",
+                "driving video",
+                "visual grounding",
+                "video generalization",
+            )
+        )
+        if modality_application_drift or (causal_application_drift and not explicit_llm_causal_eval):
             return SourceSubtype(
                 "causal_application_adjacent",
                 "paper applies causal framing to discovery, alignment, robustness, modality, or process-reward settings rather than evaluating LLM causal reasoning ability",

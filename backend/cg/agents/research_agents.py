@@ -1182,30 +1182,35 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "\n"
                 "【结论生成要求 - 严格执行】\n"
                 "1. 先生成 atomic observation，再生成 synthesis claim；不要直接从大证据池跳到领域趋势。\n"
-                "2. 【推理模式对比型】结论：必须引用 >=2 篇不同论文，且来源角色/source_subtype 应一致或明确互补\n"
-                "   ✓ '在跨领域综合模式上，论文A将知识图谱引入LLM推理，而论文B则从多模态角度进行综合'\n"
+                "2. 【推理模式对比型】结论：必须引用 >=2 篇不同论文，且来源角色/source_subtype 必须一致\n"
+                "   ✓ '在因果评测协议上，论文A构造抽象变量基准，而论文B评估统计因果陷阱'\n"
                 "   ✗ 如果只有1篇论文有证据，禁止生成对比型结论\n"
-                "3. 【单论文洞察型】结论：必须引用 >=2 条来自同一论文的证据，并显式写成'作为单论文观察'\n"
+                "3. 【跨 source-role 对照型】结论：如果 supporting_evidence_ids 来自不同 source_subtype，禁止写领域趋势；只能显式写成 benchmark/core/testbed 等角色差异对照\n"
+                "   ✓ '作为跨 source-role 对照，benchmark 论文侧重评测协议，core method 论文侧重机制设计'\n"
+                "   ✗ '该领域整体形成某种趋势'（不同 source role 混合时禁止）\n"
+                "4. 【单论文洞察型】结论：必须引用 >=2 条来自同一论文的证据，并显式写成'作为单论文观察'\n"
                 "   ✓ '论文C的表征转换创新在于将图结构转化为序列表示，有2条证据支持'\n"
                 "   ✗ 如果只有1条证据，只能生成描述性结论，措辞必须保守\n"
-                "4. 禁止生成【无实质内容的废话型】结论：\n"
+                "5. 禁止生成【无实质内容的废话型】结论：\n"
                 "   '各论文均在积极探索'（×）'方法较为新颖'（×）\n"
-                "5. 每条 Claim 必须绑定 supporting_evidence_ids，且 evidence_id 必须真实存在\n"
-                "6. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
-                "7. confidence 反映证据充分程度：\n"
+                "6. 每条 Claim 必须绑定 supporting_evidence_ids，且 evidence_id 必须真实存在\n"
+                "7. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
+                "8. confidence 反映证据充分程度：\n"
                 "   - 多篇论文交叉验证 → 0.75-0.85\n"
                 "   - 单篇论文多条证据 → 0.60-0.75\n"
                 "   - 仅1条证据 → 0.45-0.55（措辞必须非常保守）\n"
                 "\n"
                 "【证据充分性检查 - 必须遵守】\n"
                 "- 对比型结论：supporting_evidence_ids 必须来自 >=2 篇不同论文\n"
+                "- 普通 comparative 结论：supporting_evidence_ids 必须来自同一 source_subtype\n"
+                "- 不同 source_subtype 的结论：只能写成 cross_role_contrast，不得写成领域整体趋势\n"
                 "- 单论文结论：supporting_evidence_ids 必须有 >=2 条证据\n"
                 "- 如果证据不足，降低 confidence 或跳过该结论\n"
                 "\n"
                 "【输出格式】JSON：\n"
                 '{"claims":[{\n'
                 '  "dimension": "推理模式英文key",\n'
-                '  "claim_type": "comparative|single_paper|descriptive",\n'
+                '  "claim_type": "comparative|cross_role_contrast|single_paper|descriptive",\n'
                 '  "claim": "完整的分析结论（中文，50-200字）",\n'
                 '  "supporting_evidence_ids": ["ev_xxx", "ev_yyy"],\n'
                 '  "confidence": 0.75,\n'
@@ -2733,7 +2738,8 @@ def deterministic_red_team(claims: list[Claim], evidence: list[Evidence]) -> lis
         academic_evidence = bool(source_types) and source_types.issubset({"academic_paper", "local_paper"})
         claim.source_paper_count = len(source_papers)
         if claim.source_paper_count >= 2:
-            claim.claim_type = "comparative"
+            if claim.claim_type != "cross_role_contrast":
+                claim.claim_type = "comparative"
             claim.evidence_support_level = "strong" if len(supporting) >= 2 else "weak"
         elif len(supporting) >= 2:
             claim.claim_type = "single_paper_observation"

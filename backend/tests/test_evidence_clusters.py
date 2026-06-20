@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from cg.orchestrator.pipeline import apply_claim_discipline, build_claims_from_clusters, build_evidence_clusters
+from cg.agents.research_agents import deterministic_red_team
+from cg.orchestrator.pipeline import (
+    apply_claim_discipline,
+    build_claims_from_clusters,
+    build_evidence_clusters,
+    prepare_claims_for_review,
+)
 from cg.schemas.research import Claim, Evidence
 
 
@@ -201,6 +207,91 @@ def test_claim_discipline_backlogs_graph_rag_adjacent_verified_claims() -> None:
     assert reviewed[0].verification_status == "needs_evidence"
     assert reviewed[0].backlog_reason == "unsupported_source_role"
     assert reviewed[0].risk_level == "medium"
+
+
+def test_prepare_claims_rewrites_mixed_roles_as_cross_role_contrast() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Benchmark Paper",
+            "llm_causal_benchmarking",
+            "The benchmark isolates causal reasoning failures.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Core Method Paper",
+            "llm_causal_benchmarking",
+            "The method introduces causal graph prompting.",
+            source_subtype="core_llm_causal_reasoning",
+        ),
+    ]
+    claim = Claim(
+        claim_id="claim_mixed",
+        run_id="run_test",
+        dimension="llm_causal_benchmarking",
+        dimension_label="LLM causal benchmarking",
+        claim="Causal reasoning papers show a shared trend across benchmarks and methods.",
+        supporting_evidence_ids=["ev_a1", "ev_b1"],
+        confidence=0.86,
+        risk_level="low",
+        reasoning_summary="Supported by benchmark and method papers.",
+        verification_status="draft",
+    )
+
+    prepared = prepare_claims_for_review([claim], evidence)
+    reviewed = apply_claim_discipline(prepared, evidence)
+
+    assert reviewed[0].claim_type == "cross_role_contrast"
+    assert reviewed[0].backlog_reason == ""
+    assert reviewed[0].confidence == 0.72
+    assert reviewed[0].risk_level == "medium"
+    assert reviewed[0].supporting_source_subtypes == [
+        "causal_reasoning_benchmark",
+        "core_llm_causal_reasoning",
+    ]
+    assert "跨 source-role 对照" in reviewed[0].claim
+    assert "LLM causal reasoning benchmark" in reviewed[0].claim
+    assert "core LLM causal reasoning" in reviewed[0].claim
+    assert "不作为统一领域趋势" in reviewed[0].claim
+
+
+def test_deterministic_red_team_preserves_cross_role_contrast_type() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Benchmark Paper",
+            "llm_causal_benchmarking",
+            "The benchmark isolates causal reasoning failures.",
+            source_subtype="causal_reasoning_benchmark",
+        ),
+        _evidence(
+            "ev_b1",
+            "Core Method Paper",
+            "llm_causal_benchmarking",
+            "The method introduces causal graph prompting.",
+            source_subtype="core_llm_causal_reasoning",
+        ),
+    ]
+    claim = Claim(
+        claim_id="claim_cross_role",
+        run_id="run_test",
+        dimension="llm_causal_benchmarking",
+        dimension_label="LLM causal benchmarking",
+        claim="作为跨 source-role 对照，benchmark 论文侧重评测协议，core method 论文侧重机制设计。",
+        supporting_evidence_ids=["ev_a1", "ev_b1"],
+        confidence=0.72,
+        risk_level="medium",
+        reasoning_summary="Supported by benchmark and method papers.",
+        claim_type="cross_role_contrast",
+    )
+
+    reviewed = deterministic_red_team([claim], evidence)
+    disciplined = apply_claim_discipline(reviewed, evidence)
+
+    assert disciplined[0].claim_type == "cross_role_contrast"
+    assert disciplined[0].verification_status == "verified"
+    assert disciplined[0].backlog_reason == ""
 
 
 def test_evidence_clusters_track_verified_claims() -> None:

@@ -480,6 +480,54 @@ def test_causal_reasoning_llm_gate_rejects_modality_process_reward_drift() -> No
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_video_grounding_drift() -> None:
+    paper = {
+        "title": "iFinder: Structured Zero-Shot Vision-Based LLM Grounding for Dash-Cam Video Reasoning",
+        "abstract": (
+            "Grounding large language models in post-hoc dash-cam driving video "
+            "analysis is challenging. The method uses visual grounding, object "
+            "poses, and lane semantics for video reasoning."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/ifinder_video_grounding.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs causal explanation mechanism",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
+def test_causal_reasoning_llm_gate_rejects_video_counterfactual_benchmark_drift() -> None:
+    paper = {
+        "title": "Reasoning is All You Need for Video Generalization: A Counterfactual Benchmark with Sub-question Evaluation",
+        "abstract": (
+            "Counterfactual reasoning is crucial for robust video understanding. "
+            "This work introduces a multidimensional multimodal benchmark that "
+            "evaluates MLLMs on video generalization with sub-question evaluation."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/video_counterfactual_benchmark.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs robustness counterfactual benchmark",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
 def test_causal_reasoning_llm_gate_rejects_uncertain_text_reasoning_drift() -> None:
     paper = {
         "title": "Reasoning over Uncertain Text by Generative Large Language Models",
