@@ -365,7 +365,7 @@ def test_analysis_report_does_not_promote_audit_only_representative_evidence() -
     assert "代表性证据显示" not in report
 
 
-def test_report_ready_representative_evidence_uses_clean_snippets() -> None:
+def test_report_ready_representative_evidence_uses_axis_summary() -> None:
     request = ResearchRequest(
         project_name="Representative snippet cleanup regression",
         target_topic="Counterfactual Inference",
@@ -395,7 +395,10 @@ def test_report_ready_representative_evidence_uses_clean_snippets() -> None:
 
     body = report.split("## Evidence 附录", 1)[0]
     assert "代表性支撑证据" in body
-    assert "identifiability assumptions are evaluated through a shared protocol" in body
+    assert "共同支撑" in body
+    assert "主体结论只引用该范围限定证据" in body
+    assert "原文片段保留在 Evidence 附录" in body
+    assert "identifiability assumptions are evaluated through a shared protocol" not in body
     assert "相关论文文本中出现了可核验表述" not in body
 
 
@@ -442,7 +445,8 @@ def test_report_ready_representative_evidence_filters_ocr_fragments() -> None:
     assert "nism for efficient" not in body
     assert "directional struc" not in body
     assert "Figure 1:" not in body
-    assert "围绕结构因果假设、反事实查询和可识别性条件提供可审计支撑" in body
+    assert "共同支撑" in body
+    assert "主体结论只引用该范围限定证据" in body
 
 
 def test_report_ready_representative_evidence_filters_title_fragments() -> None:

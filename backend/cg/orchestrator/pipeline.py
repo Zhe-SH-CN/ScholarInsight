@@ -4096,12 +4096,10 @@ def build_analysis_report(
             evidence,
         )
         if representative_evidence:
-            examples = [
-                f"{compact_paper_title(item.paper or '相关论文', 70)}：{report_evidence_snippet(item)}"
-                f"{citations_for_ids([item.evidence_id], citation_numbers)}"
-                for item in representative_evidence[:4]
-            ]
-            lines.append(f"- 代表性支撑证据：{'；'.join(examples)}。")
+            lines.append(
+                f"- 代表性支撑证据："
+                f"{representative_evidence_axis_summary(report_ready_claims, representative_evidence, citation_numbers)}"
+            )
         if audit_only_claims:
             lines.extend(["", "#### 待验证观察与补证线索", ""])
         for claim in audit_only_claims[:4]:
@@ -4253,6 +4251,35 @@ def report_ready_representative_evidence(
         ],
         key=lambda item: (report_evidence_snippet_score(item), item.confidence),
         reverse=True,
+    )
+
+
+def representative_evidence_axis_summary(
+    report_ready_claims: list[Claim],
+    representative_evidence: list[Evidence],
+    citation_numbers: dict[str, int],
+) -> str:
+    lead_claim = sorted(
+        report_ready_claims,
+        key=lambda item: (item.source_paper_count, len(item.supporting_evidence_ids), item.confidence),
+        reverse=True,
+    )[0]
+    axis = cluster_axis_phrase(lead_claim.evidence_cluster_label) if lead_claim.evidence_cluster_label else lead_claim.dimension_label
+    role_text = role_backing_phrase(lead_claim) or f"{lead_claim.source_paper_count} 篇独立论文"
+    paper_bits = []
+    seen: set[str] = set()
+    for item in representative_evidence:
+        paper = compact_paper_title(item.paper or item.source_title or "相关论文", 58)
+        if paper in seen:
+            continue
+        seen.add(paper)
+        paper_bits.append(f"{paper}{citations_for_ids([item.evidence_id], citation_numbers)}")
+        if len(paper_bits) >= 4:
+            break
+    papers = "、".join(paper_bits) or "相关论文"
+    return (
+        f"{papers} 共同支撑“{axis}”证据轴；当前由 {role_text} 支撑，"
+        "主体结论只引用该范围限定证据，原文片段保留在 Evidence 附录。"
     )
 
 
