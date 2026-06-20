@@ -93,6 +93,7 @@ def test_cluster_claims_synthesize_only_same_source_role() -> None:
     assert set(claim.supporting_evidence_ids) == {"ev_a1", "ev_b1"}
     assert claim.supporting_source_subtypes == ["kgqa_or_graph_reasoning"]
     assert claim.supporting_source_subtype_counts == {"kgqa_or_graph_reasoning": 2}
+    assert claim.supporting_source_subtype_paper_counts == {"kgqa_or_graph_reasoning": 2}
 
 
 def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
@@ -132,6 +133,7 @@ def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
     assert reviewed[0].risk_level == "medium"
     assert reviewed[0].supporting_source_subtypes == ["causal_inference_adjacent"]
     assert reviewed[0].supporting_source_subtype_counts == {"causal_inference_adjacent": 2}
+    assert reviewed[0].supporting_source_subtype_paper_counts == {"causal_inference_adjacent": 2}
 
 
 def test_graph_rag_adjacent_sources_do_not_create_core_synthesis() -> None:
@@ -254,6 +256,10 @@ def test_prepare_claims_rewrites_mixed_roles_as_cross_role_contrast() -> None:
         "causal_reasoning_benchmark",
         "core_llm_causal_reasoning",
     ]
+    assert reviewed[0].supporting_source_subtype_paper_counts == {
+        "causal_reasoning_benchmark": 1,
+        "core_llm_causal_reasoning": 1,
+    }
     assert "跨 source-role 对照" in reviewed[0].claim
     assert "LLM causal reasoning benchmark" in reviewed[0].claim
     assert "core LLM causal reasoning" in reviewed[0].claim
@@ -296,6 +302,76 @@ def test_deterministic_red_team_preserves_cross_role_contrast_type() -> None:
     assert disciplined[0].claim_type == "cross_role_contrast"
     assert disciplined[0].verification_status == "verified"
     assert disciplined[0].backlog_reason == ""
+    assert claim_report_ready_reason(disciplined[0]) == "insufficient_cross_role_total_papers"
+
+
+def test_cross_role_contrast_report_ready_requires_role_level_paper_support() -> None:
+    valid = Claim(
+        claim_id="claim_cross_role_ready",
+        run_id="run_test",
+        dimension="llm_causal_benchmarking",
+        dimension_label="LLM causal benchmarking",
+        claim=(
+            "Benchmark sources emphasize evaluation protocols, while core method sources emphasize "
+            "causal graph prompting mechanisms across independent papers."
+        ),
+        supporting_evidence_ids=["ev_a1", "ev_a2", "ev_b1", "ev_b2"],
+        confidence=0.82,
+        risk_level="low",
+        reasoning_summary="Supported by two benchmark papers and two core method papers.",
+        verification_status="verified",
+        claim_type="cross_role_contrast",
+        source_paper_count=4,
+        evidence_support_level="strong",
+        supporting_source_subtypes=[
+            "causal_reasoning_benchmark",
+            "core_llm_causal_reasoning",
+        ],
+        supporting_source_subtype_counts={
+            "causal_reasoning_benchmark": 2,
+            "core_llm_causal_reasoning": 2,
+        },
+        supporting_source_subtype_paper_counts={
+            "causal_reasoning_benchmark": 2,
+            "core_llm_causal_reasoning": 2,
+        },
+    )
+    thin = valid.model_copy(
+        update={
+            "claim_id": "claim_cross_role_thin",
+            "source_paper_count": 3,
+            "supporting_source_subtype_paper_counts": {
+                "causal_reasoning_benchmark": 2,
+                "core_llm_causal_reasoning": 1,
+            },
+        }
+    )
+    imbalanced = valid.model_copy(
+        update={
+            "claim_id": "claim_cross_role_imbalanced",
+            "source_paper_count": 4,
+            "supporting_source_subtypes": [
+                "causal_reasoning_benchmark",
+                "core_llm_causal_reasoning",
+                "llm_counterfactual_reasoning",
+            ],
+            "supporting_source_subtype_counts": {
+                "causal_reasoning_benchmark": 2,
+                "core_llm_causal_reasoning": 1,
+                "llm_counterfactual_reasoning": 1,
+            },
+            "supporting_source_subtype_paper_counts": {
+                "causal_reasoning_benchmark": 2,
+                "core_llm_causal_reasoning": 1,
+                "llm_counterfactual_reasoning": 1,
+            },
+        }
+    )
+
+    assert claim_report_ready_reason(valid) == ""
+    assert is_report_ready_claim(valid)
+    assert claim_report_ready_reason(thin) == "insufficient_cross_role_total_papers"
+    assert claim_report_ready_reason(imbalanced) == "insufficient_cross_role_role_papers"
 
 
 def test_report_ready_claim_requires_more_than_audit_verified() -> None:

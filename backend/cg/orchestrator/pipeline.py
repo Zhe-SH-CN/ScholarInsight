@@ -2154,6 +2154,7 @@ def build_claim_from_support(
     source_count = len({ev.source_url for ev in supporting})
     paper_count = len({paper_key(ev) for ev in supporting})
     source_role_counts = claim_source_role_counts(supporting)
+    source_role_paper_counts = claim_source_role_paper_counts(supporting)
     claim_type = "comparative" if paper_count >= 2 else "single_paper_observation"
     support_level = evidence_support_level(len(supporting), paper_count)
     confidence = min(0.92, average([ev.confidence for ev in supporting]) * min(1.0, 0.65 + len(supporting) * 0.08))
@@ -2172,6 +2173,7 @@ def build_claim_from_support(
         evidence_support_level=support_level,
         supporting_source_subtypes=sorted(source_role_counts),
         supporting_source_subtype_counts=source_role_counts,
+        supporting_source_subtype_paper_counts=source_role_paper_counts,
         verification_status="draft",
     )
 
@@ -2728,6 +2730,13 @@ def claim_source_role_counts(supporting: list[Evidence]) -> dict[str, int]:
     return dict(sorted(counts.items()))
 
 
+def claim_source_role_paper_counts(supporting: list[Evidence]) -> dict[str, int]:
+    by_role: dict[str, set[str]] = defaultdict(set)
+    for ev in supporting:
+        by_role[ev.source_subtype or "unclassified"].add(paper_key(ev))
+    return {role: len(papers) for role, papers in sorted(by_role.items())}
+
+
 def source_role_label(role: str) -> str:
     return SOURCE_ROLE_LABELS.get(role, role.replace("_", " "))
 
@@ -2763,10 +2772,12 @@ def prepare_claims_for_review(claims: list[Claim], evidence: list[Evidence]) -> 
         source_roles = {ev.source_subtype for ev in supporting if ev.source_subtype}
         reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
         source_role_counts = claim_source_role_counts(supporting)
+        source_role_paper_counts = claim_source_role_paper_counts(supporting)
         claim.source_paper_count = paper_count
         claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
         claim.supporting_source_subtypes = sorted(source_role_counts)
         claim.supporting_source_subtype_counts = source_role_counts
+        claim.supporting_source_subtype_paper_counts = source_role_paper_counts
         if len(supporting) < 2:
             claim.claim_type = "backlog"
             claim.backlog_reason = "single_evidence_claim"
@@ -2804,10 +2815,12 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
         source_roles = {ev.source_subtype for ev in supporting if ev.source_subtype}
         reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
         source_role_counts = claim_source_role_counts(supporting)
+        source_role_paper_counts = claim_source_role_paper_counts(supporting)
         claim.source_paper_count = paper_count
         claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
         claim.supporting_source_subtypes = sorted(source_role_counts)
         claim.supporting_source_subtype_counts = source_role_counts
+        claim.supporting_source_subtype_paper_counts = source_role_paper_counts
         if claim.claim_type == "cross_role_contrast" and paper_count >= 2:
             claim.claim_type = "cross_role_contrast"
         elif paper_count >= 2:
@@ -2863,6 +2876,22 @@ def claim_report_ready_reason(claim: Claim) -> str:
         return "missing_source_role_counts"
     if not source_roles.issubset(SYNTHESIS_SOURCE_ROLES):
         return "unsupported_source_role"
+    role_paper_counts = getattr(claim, "supporting_source_subtype_paper_counts", {}) or {}
+    if not role_paper_counts and len(source_roles) == 1:
+        role = next(iter(source_roles))
+        role_paper_counts = {role: claim.source_paper_count}
+    if claim.claim_type == "cross_role_contrast":
+        reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
+        if len(reportable_roles) < 2:
+            return "invalid_cross_role_contrast"
+        if not role_paper_counts:
+            return "missing_source_role_paper_counts"
+        if not source_roles.issubset(set(role_paper_counts)):
+            return "missing_source_role_paper_counts"
+        if claim.source_paper_count < 4:
+            return "insufficient_cross_role_total_papers"
+        if any(role_paper_counts.get(role, 0) < 2 for role in reportable_roles):
+            return "insufficient_cross_role_role_papers"
     text = best_claim_text(claim)
     if any(
         marker in text
@@ -2916,6 +2945,7 @@ def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[di
                 "supporting_papers": sorted({paper_key(ev) for ev in supporting}),
                 "supporting_source_subtypes": claim.supporting_source_subtypes,
                 "supporting_source_subtype_counts": claim.supporting_source_subtype_counts,
+                "supporting_source_subtype_paper_counts": claim.supporting_source_subtype_paper_counts,
                 "claim": claim.final_wording or claim.claim,
                 "red_team_notes": [note.model_dump(mode="json") for note in claim.red_team_notes],
                 "supporting_evidence_ids": claim.supporting_evidence_ids,
