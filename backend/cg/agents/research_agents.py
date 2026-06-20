@@ -1471,33 +1471,48 @@ class AnalysisAndReviewAgent(BaseAgent):
     ) -> ResearchFeedback:
         """评估当前证据缺口，决定是否需要继续搜索以及补充什么。"""
         dimensions = request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_topic]
+        evidence_by_id = {ev.evidence_id: ev for ev in evidence}
+        evidence_count_by_dim: Counter[str] = Counter()
+        papers_by_dim: dict[str, set[str]] = {dim: set() for dim in dimensions}
+        verified_claims_by_dim: Counter[str] = Counter()
+        challenged_claims_by_dim: Counter[str] = Counter()
 
-        # 计算各维度×推理模式的覆盖情况
-        coverage_map: dict[tuple[str, str], int] = {}
         for ev in evidence:
-            if ev.paper and ev.dimension:
-                key = (ev.paper, ev.dimension)
-                coverage_map[key] = coverage_map.get(key, 0) + 1
+            if ev.dimension not in dimensions:
+                continue
+            evidence_count_by_dim[ev.dimension] += 1
+            paper = ev.paper or ev.source_title or ev.source_url or ev.url
+            if paper:
+                papers_by_dim.setdefault(ev.dimension, set()).add(paper)
 
-        # 找出覆盖为 0 的空白格
+        for claim in claims:
+            dim = claim.dimension if claim.dimension in dimensions else "other"
+            if dim not in dimensions:
+                continue
+            supporting = [evidence_by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in evidence_by_id]
+            if not supporting:
+                continue
+            if claim.verification_status == "verified" and claim.risk_level != "high":
+                verified_claims_by_dim[dim] += 1
+            else:
+                challenged_claims_by_dim[dim] += 1
+
         empty_cells = [
-            (entity, dim)
-            for entity in entities
+            (request.target_topic, dim)
             for dim in dimensions
-            if coverage_map.get((entity, dim), 0) == 0
+            if evidence_count_by_dim.get(dim, 0) == 0
         ]
         weak_cells = [
-            (entity, dim)
-            for entity in entities
+            (request.target_topic, dim)
             for dim in dimensions
-            if 0 < coverage_map.get((entity, dim), 0) < 2
+            if evidence_count_by_dim.get(dim, 0) > 0
+            and (len(papers_by_dim.get(dim, set())) < 2 or verified_claims_by_dim.get(dim, 0) == 0)
         ]
 
         high_priority_weak_cells = [
             (entity, dim)
             for entity, dim in weak_cells
-            if entity == request.target_topic
+            if verified_claims_by_dim.get(dim, 0) == 0
         ]
 
         # 覆盖度足够且没有关键空白/弱覆盖时才停止，避免 50% 这种刚过线的状态过早收敛。
@@ -1516,9 +1531,12 @@ class AnalysisAndReviewAgent(BaseAgent):
 
         if not self.llm_enabled:
             # 直接用规则生成 gap
+            lower_priority_weak_cells = [cell for cell in weak_cells if cell not in high_priority_weak_cells]
             gap_cells = empty_cells[:6]
             remaining_slots = max(0, 6 - len(gap_cells))
             gap_cells = [*gap_cells, *high_priority_weak_cells[:remaining_slots]]
+            remaining_slots = max(0, 6 - len(gap_cells))
+            gap_cells = [*gap_cells, *lower_priority_weak_cells[:remaining_slots]]
             gaps = [
                 ResearchGap(
                     dimension=dim,
@@ -1526,9 +1544,9 @@ class AnalysisAndReviewAgent(BaseAgent):
                     reason=(
                         "本轮未采集到任何证据"
                         if (entity, dim) in empty_cells
-                        else "当前只有少量证据，仍不足以支撑稳健结论"
+                        else "当前 evidence 尚未形成足够的独立论文支撑或 Red Team verified claim"
                     ),
-                    priority="high" if entity == request.target_topic else "medium",
+                    priority="high" if (entity, dim) in high_priority_weak_cells or (entity, dim) in empty_cells else "medium",
                     suggested_queries=[
                         f"{entity} {DIMENSION_LABELS.get(dim, dim)} 评测",
                         f"{entity} {dim} official",
@@ -1546,7 +1564,16 @@ class AnalysisAndReviewAgent(BaseAgent):
 
         # 用 LLM 生成更智能的补充建议
         payload = {
-            "coverage_map": {f"{e}×{DIMENSION_LABELS.get(d, d)}": n for (e, d), n in coverage_map.items()},
+            "dimension_stats": {
+                dim: {
+                    "label": DIMENSION_LABELS.get(dim, dim),
+                    "evidence_count": evidence_count_by_dim.get(dim, 0),
+                    "independent_paper_count": len(papers_by_dim.get(dim, set())),
+                    "verified_claim_count": verified_claims_by_dim.get(dim, 0),
+                    "challenged_claim_count": challenged_claims_by_dim.get(dim, 0),
+                }
+                for dim in dimensions
+            },
             "empty_cells": [{"entity": e, "dimension": DIMENSION_LABELS.get(d, d)} for e, d in empty_cells[:12]],
             "weak_cells": [{"entity": e, "dimension": DIMENSION_LABELS.get(d, d)} for e, d in weak_cells[:8]],
             "coverage_score": f"{coverage_score:.0%}",
@@ -1563,12 +1590,13 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "只有同时满足以下条件时才停止：\n"
                 f"  1. 覆盖度 ≥ {self.ctx.settings.cg_min_coverage_to_stop:.0%}\n"
                 "  2. 没有关键维度的空白格/弱覆盖格\n"
-                "  3. 核心研究方向已有多个推理模式的有效证据\n"
+                "  3. 核心研究方向已有多个推理模式的 Red Team verified claim\n"
                 "  4. 若仍存在高优先级缺口，即使已到第 2 轮也继续建议补充搜索\n"
                 "\n"
                 "【缺口优先级判断】\n"
                 "  high（必须补）：核心推理模式在任意维度完全没有证据\n"
-                "  high（必须补）：关键维度只有 1 条证据，无法交叉验证\n"
+                "  high（必须补）：已有 evidence 但没有 Red Team verified claim，无法进入主报告\n"
+                "  high（必须补）：关键维度只覆盖 1 篇论文，无法交叉验证\n"
                 "  medium（建议补）：次要维度没有证据或证据较弱\n"
                 "  low（可选补）：非核心维度证据较弱\n"
                 "\n"
@@ -1594,22 +1622,28 @@ class AnalysisAndReviewAgent(BaseAgent):
             user=(
                 f"研究方向：{request.target_topic}\n"
                 f"当前轮次：第 {loop_round} 轮  当前覆盖度：{coverage_score:.0%}\n\n"
-                f"证据覆盖矩阵（研究方向×推理模式 → 证据条数）：\n"
+                f"按推理模式聚合的证据与 verified claim 覆盖：\n"
                 + "\n".join(
-                    f"  {e} × {DIMENSION_LABELS.get(d, d)}: {coverage_map.get((e, d), 0)} 条"
-                    for e in [request.target_topic]
-                    for d in request.analysis_dimensions
+                    f"  {DIMENSION_LABELS.get(d, d)}: "
+                    f"{evidence_count_by_dim.get(d, 0)} 条 evidence，"
+                    f"{len(papers_by_dim.get(d, set()))} 篇独立论文，"
+                    f"{verified_claims_by_dim.get(d, 0)} 条 verified claim，"
+                    f"{challenged_claims_by_dim.get(d, 0)} 条 challenged/backlog claim"
+                    for d in dimensions
                 )
                 + f"\n\n空白格（0条证据）：{len(empty_cells)} 个\n"
                 + "\n".join(f"  - {e} × {DIMENSION_LABELS.get(d, d)}" for e, d in empty_cells[:10])
-                + f"\n\n弱覆盖格（1条证据）：{len(weak_cells)} 个"
+                + f"\n\n弱覆盖格（无 verified claim 或独立论文不足）：{len(weak_cells)} 个"
             ),
         )
 
         if not data:
+            lower_priority_weak_cells = [cell for cell in weak_cells if cell not in high_priority_weak_cells]
             gap_cells = empty_cells[:4]
             remaining_slots = max(0, 4 - len(gap_cells))
             gap_cells = [*gap_cells, *high_priority_weak_cells[:remaining_slots]]
+            remaining_slots = max(0, 4 - len(gap_cells))
+            gap_cells = [*gap_cells, *lower_priority_weak_cells[:remaining_slots]]
             gaps = [
                 ResearchGap(
                     dimension=dim,
@@ -1617,9 +1651,9 @@ class AnalysisAndReviewAgent(BaseAgent):
                     reason=(
                         "证据为空"
                         if (entity, dim) in empty_cells
-                        else "证据较少，建议补充交叉验证来源"
+                        else "当前维度缺少足够的独立论文支撑或 Red Team verified claim"
                     ),
-                    priority="high",
+                    priority="high" if (entity, dim) in high_priority_weak_cells or (entity, dim) in empty_cells else "medium",
                     suggested_queries=[f"{entity} {dim}"],
                 )
                 for entity, dim in gap_cells
@@ -1637,9 +1671,11 @@ class AnalysisAndReviewAgent(BaseAgent):
         for row in raw_gaps[:8]:
             if not isinstance(row, dict):
                 continue
-            dim = str(row.get("dimension") or "other")
-            if dim not in DIMENSION_LABELS:
-                dim = "other"
+            suggested_queries = coerce_str_list(row.get("suggested_queries"))[:4]
+            dim = normalize_dimension_key(
+                row.get("dimension"),
+                " ".join([str(row.get("reason") or ""), *suggested_queries]),
+            )
             priority = str(row.get("priority") or "medium")
             if priority not in {"high", "medium", "low"}:
                 priority = "medium"
@@ -1648,7 +1684,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 paper=str(row.get("paper") or request.target_topic),
                 reason=str(row.get("reason") or ""),
                 priority=priority,  # type: ignore[arg-type]
-                suggested_queries=coerce_str_list(row.get("suggested_queries"))[:4],
+                suggested_queries=suggested_queries,
             ))
 
         await self.record_llm_event(
@@ -2673,6 +2709,54 @@ def normalize_dimensions(values: list[str]) -> list[str]:
         elif item in reverse:
             normalized.append(reverse[item])
     return normalized
+
+
+DIMENSION_HINTS: dict[str, tuple[str, ...]] = {
+    "gap_driven_reframing": ("pain point", "failure analysis", "method reconstruction", "痛点", "失败分析"),
+    "cross_domain_synthesis": ("cross-domain", "cross domain", "multimodal integration", "跨领域"),
+    "representation_shift": (
+        "representation transformation",
+        "representation shift",
+        "symbolic representation",
+        "natural language to symbolic",
+        "符号表达",
+        "表征",
+    ),
+    "modular_pipeline_composition": ("modular pipeline", "planner solver verifier", "multi step pipeline", "模块化", "管线"),
+    "data_evaluation_engineering": ("benchmark", "dataset", "evaluation", "contamination", "数据", "评测"),
+    "principled_probabilistic_modeling": ("probabilistic", "uncertainty", "bayesian", "calibration", "概率", "不确定性"),
+    "formal_experimental_tightening": ("controlled experiment", "theory experiment", "process supervision", "ablation", "理论实验", "实验"),
+    "approximation_engineering": ("approximation", "approximate", "efficiency", "compression", "近似"),
+    "inference_time_control": ("inference time", "test time", "self consistency", "tree search", "verifier guided", "推理时"),
+    "structural_inductive_bias": ("structural inductive bias", "expression tree", "proof graph", "结构归纳"),
+    "multiscale_hierarchical_modeling": ("hierarchical", "multi-scale", "multiscale", "多尺度", "分层"),
+    "mechanistic_decomposition": ("mechanism decomposition", "mechanistic", "decomposition of reasoning", "机制分解"),
+    "adversary_modeling": ("adversarial", "robustness", "red team", "对抗"),
+    "numerics_systems_codesign": ("numeric", "numerical", "systems codesign", "数值", "系统协同"),
+    "data_centric_optimization": ("data-centric", "data centric", "instruction tuning", "synthetic data", "数据中心"),
+}
+
+
+def normalize_dimension_key(value: Any, context: str = "") -> str:
+    raw = str(value or "").strip()
+    if raw in DIMENSION_LABELS:
+        return raw
+
+    lower_raw = raw.lower()
+    for key, label in DIMENSION_LABELS.items():
+        if lower_raw == key.lower() or raw == label:
+            return key
+
+    raw_context = f"{raw} {context}"
+    combined = raw_context.lower()
+    for key, label in DIMENSION_LABELS.items():
+        if key.lower() in combined or (label and label in raw_context):
+            return key
+
+    for key, hints in DIMENSION_HINTS.items():
+        if any(hint.lower() in combined for hint in hints):
+            return key
+    return "other"
 
 
 def normalize_agent_flow(values: list[str]) -> list[str]:

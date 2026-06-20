@@ -28,6 +28,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_base_url: str = ""
     gemini_model: str = "gemini-pro-agent"
+    red_team_llm_provider: str = "gemini"
+    red_team_llm_model: str = ""
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     qwen_api_key: str = ""

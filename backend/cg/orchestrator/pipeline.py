@@ -237,8 +237,8 @@ class ResearchPipeline:
         self.search = LocalPaperSearchTool(self.settings)
         self.fetcher = Fetcher(self.settings)
         self.llm = LLMClient(self.settings)
-        # Gemini 红队 LLM（独立配置）
-        self._gemini_llm: LLMClient | None = None
+        # Red-team LLM uses independent model selection while reusing configured credentials.
+        self._red_team_llm: LLMClient | None = None
 
     def _checkpoint_path(self, run_id: str) -> Path:
         return self.runs.run_dir(run_id) / "checkpoint.json"
@@ -261,18 +261,41 @@ class ResearchPipeline:
         if path.exists():
             path.unlink()
 
+    def _red_team_provider_model(self) -> tuple[str, str]:
+        provider = (self.settings.red_team_llm_provider or "gemini").strip().lower()
+        model = (self.settings.red_team_llm_model or "").strip()
+        if provider in {"gpt-5.5", "gpt55", "gpt_5_5"}:
+            return "gemini", model or "gpt-5.5"
+        if provider == "gemini":
+            return "gemini", model or self.settings.gemini_model
+        return provider, model or self.settings.cg_llm_model
+
     @property
-    def gemini_llm(self) -> LLMClient:
-        """Gemini LLM for red-team review (lazy init)."""
-        if self._gemini_llm is None:
-            gemini_settings = Settings(
-                cg_llm_provider="gemini",
-                cg_llm_model=self.settings.gemini_model,
+    def red_team_llm(self) -> LLMClient:
+        """Independent red-team reviewer LLM (lazy init)."""
+        if self._red_team_llm is None:
+            provider, model = self._red_team_provider_model()
+            red_team_settings = Settings(
+                cg_llm_provider=provider,
+                cg_llm_model=model,
+                cg_llm_temperature=self.settings.cg_llm_temperature,
+                cg_llm_timeout_seconds=self.settings.cg_llm_timeout_seconds,
+                cg_llm_min_interval_seconds=self.settings.cg_llm_min_interval_seconds,
+                cg_llm_max_retries=self.settings.cg_llm_max_retries,
+                cg_llm_rate_limit_cooldown_seconds=self.settings.cg_llm_rate_limit_cooldown_seconds,
+                mimo_api_key=self.settings.mimo_api_key,
+                mimo_base_url=self.settings.mimo_base_url,
                 gemini_api_key=self.settings.gemini_api_key,
                 gemini_base_url=self.settings.gemini_base_url,
+                deepseek_api_key=self.settings.deepseek_api_key,
+                deepseek_base_url=self.settings.deepseek_base_url,
+                qwen_api_key=self.settings.qwen_api_key,
+                qwen_base_url=self.settings.qwen_base_url,
+                ark_api_key=self.settings.ark_api_key,
+                ark_base_url=self.settings.ark_base_url,
             )
-            self._gemini_llm = LLMClient(gemini_settings)
-        return self._gemini_llm
+            self._red_team_llm = LLMClient(red_team_settings)
+        return self._red_team_llm
 
     async def prepare_run(self, request: ResearchRequest, owner: str | None = None) -> RunStatus:
         return await self.runs.create(request, owner=owner)
@@ -457,7 +480,7 @@ class ResearchPipeline:
 
                     # 构建矩阵用于覆盖度计算
                     dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-                    papers = [request.target_topic]
+                    papers = select_matrix_papers(request, all_evidence)
                     interim_matrix = build_paper_pattern_matrix(all_evidence, papers, dimensions)
                     coverage_score = sum(interim_matrix.coverage_by_dimension.values()) / max(
                         1, len(interim_matrix.coverage_by_dimension)
@@ -814,7 +837,7 @@ class ResearchPipeline:
                         await self.runs.save_status(status)
 
                         dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-                        papers = [request.target_topic]
+                        papers = select_matrix_papers(request, all_evidence)
                         interim_matrix = build_paper_pattern_matrix(all_evidence, papers, dimensions)
                         coverage_score = sum(interim_matrix.coverage_by_dimension.values()) / max(
                             1, len(interim_matrix.coverage_by_dimension)
@@ -1326,17 +1349,16 @@ class ResearchPipeline:
     async def red_team(
         self, run_id: str, claims: list[Claim], evidence: list[Evidence]
     ) -> list[Claim]:
-        # 红队使用 Gemini（模型多样性）
-        gemini_ctx = AgentContext(
+        red_team_ctx = AgentContext(
             run_id=run_id,
             run_dir=self.runs.run_dir(run_id),
             settings=self.settings,
-            llm=self.gemini_llm,
+            llm=self.red_team_llm,
             trace=lambda node, phase, status, message, payload=None: self.trace(
                 run_id, node, phase, status, message, payload
             ),
         )
-        reviewed = await AnalysisAndReviewAgent(gemini_ctx).review(claims, evidence)
+        reviewed = await AnalysisAndReviewAgent(red_team_ctx).review(claims, evidence)
         reviewed = apply_claim_discipline(reviewed, evidence)
         run_dir = self.runs.run_dir(run_id)
         await atomic_write_json(run_dir / "exports" / "claim_backlog.json", claim_backlog_rows(reviewed, evidence))
@@ -2202,6 +2224,17 @@ def unique_strings(values: list[str | None]) -> list[str]:
         seen.add(item)
         result.append(item)
     return result
+
+
+def select_matrix_papers(request: ResearchRequest, evidence: list[Evidence], limit: int = 12) -> list[str]:
+    paper_counts = Counter(ev.paper for ev in evidence if ev.paper)
+    papers = unique_strings(
+        [
+            *request.seed_papers,
+            *[paper for paper, _ in paper_counts.most_common()],
+        ]
+    )[:limit]
+    return papers or [request.target_topic]
 
 
 def average(values: list[float]) -> float:
