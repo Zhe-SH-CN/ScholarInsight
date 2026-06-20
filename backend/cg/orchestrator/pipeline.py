@@ -1534,7 +1534,11 @@ def build_recommendations(
     )
     target_weak = target_profile.weak_or_unknown_dimensions if target_profile else []
 
-    strategic_claims = claims[:3]
+    strategic_claims = [
+        claim
+        for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
+        if claim.verification_status == "verified" and claim.risk_level != "high"
+    ][:3]
     if strategic_claims:
         evidence_ids = unique_strings(
             [ev_id for claim in strategic_claims[:3] for ev_id in claim.supporting_evidence_ids]
@@ -1560,6 +1564,38 @@ def build_recommendations(
                 ],
                 risks=["当前系统只使用公开论文资料，研究结论仍需结合领域知识校验。"],
                 confidence=round(average([claim.confidence for claim in strategic_claims[:3]]), 3),
+            )
+        )
+    elif claims:
+        weak_claims = [
+            claim
+            for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
+            if claim.verification_status in {"needs_evidence", "challenged"} and claim.risk_level != "high"
+        ][:5]
+        evidence_ids = unique_strings(
+            [ev_id for claim in weak_claims for ev_id in claim.supporting_evidence_ids]
+        )
+        recommendations.append(
+            OpportunityRecommendation(
+                recommendation_id=stable_id("rec", f"{run_id}:claim-review:{len(weak_claims)}"),
+                title="先完成高风险结论的补证闭环",
+                recommendation=(
+                    f"本轮 {request.target_topic} 尚缺少足够的 Red Team verified claim；"
+                    "下一步应优先围绕被挑战但仍有信息量的观察补充交叉证据，再决定是否写成研究机会。"
+                ),
+                priority="high",
+                target_audience="researcher",
+                rationale="当前建议不应建立在 challenged 或 needs_evidence claim 上，否则会把检索噪声包装成研究结论。",
+                expected_value="把报告从一次性文本产物转为可审计的研究证据工作台，降低误导性结论风险。",
+                based_on_claim_ids=[],
+                evidence_ids=evidence_ids[:8],
+                next_steps=[
+                    "按 Red Team 风险类型拆分补证队列",
+                    "为每个待验证观察补充至少两个独立论文来源",
+                    "重新运行 Claim review 后再生成正式研究机会建议",
+                ],
+                risks=["如果不补证，报告只能作为探索性阅读线索，不能作为论文选题依据。"],
+                confidence=0.48,
             )
         )
 
@@ -1635,6 +1671,9 @@ def build_observability(
     red_team_rate = metrics.challenged_claim_count / max(1, metrics.claim_count)
     coverage_score = average(list(matrix.coverage_by_paper.values()) + list(matrix.coverage_by_dimension.values()))
     confidence = average([ev.confidence for ev in evidence] + [claim.confidence for claim in claims])
+    report_confidence = round(min(0.95, confidence * (0.55 + coverage_score * 0.45)), 3)
+    report_ready = claim_pass_rate >= 0.2 and coverage_score >= 0.25 and report_confidence >= 0.55
+    report_warn = claim_pass_rate >= 0.1 and coverage_score >= 0.18
     gates = [
         QualityGate(
             gate_id="gate_evidence_volume",
@@ -1668,6 +1707,28 @@ def build_observability(
             message=f"矩阵覆盖度为 {coverage_score:.0%}。",
             suggested_action="补齐低覆盖推理模式或低覆盖维度的来源。",
         ),
+        QualityGate(
+            gate_id="gate_report_readiness",
+            name="报告结论可用性",
+            status="pass" if report_ready else "warn" if report_warn else "fail",
+            score=round(
+                min(
+                    1.0,
+                    claim_pass_rate / 0.2 if claim_pass_rate else 0.0,
+                    coverage_score / 0.25 if coverage_score else 0.0,
+                    report_confidence / 0.55 if report_confidence else 0.0,
+                ),
+                3,
+            ),
+            message=(
+                f"Claim 通过率 {claim_pass_rate:.0%}，矩阵覆盖度 {coverage_score:.0%}，"
+                f"报告置信度 {report_confidence:.0%}。"
+            ),
+            suggested_action=(
+                "未通过时，报告只能标注为探索性 pilot；主结论只使用 verified claims，"
+                "其余观察进入补证队列。"
+            ),
+        ),
     ]
     return ObservabilitySnapshot(
         generated_at=now,
@@ -1681,7 +1742,7 @@ def build_observability(
         claim_pass_rate=round(claim_pass_rate, 3),
         red_team_challenge_rate=round(red_team_rate, 3),
         evidence_coverage_score=round(coverage_score, 3),
-        report_confidence=round(min(0.95, confidence * (0.55 + coverage_score * 0.45)), 3),
+        report_confidence=report_confidence,
         quality_gates=gates,
         export_files={
             "markdown_report": "reports/report.md",
@@ -2043,10 +2104,16 @@ def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, cl
         label = matrix.dimension_labels.get(strongest_dimension[0][0], strongest_dimension[0][0])
         findings.append(f"本次资料覆盖最充分的维度是 {label}，覆盖度约 {strongest_dimension[0][1]:.0%}。")
 
-    verified = [claim for claim in claims if claim.verification_status == "verified"]
-    lead_claims = sorted(verified or claims, key=lambda item: item.confidence, reverse=True)[:3]
-    for claim in lead_claims:
-        findings.append(f"{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}：{compact_fact(best_claim_text(claim), 150)}")
+    verified = [
+        claim for claim in claims
+        if claim.verification_status == "verified" and claim.risk_level != "high"
+    ]
+    lead_claims = sorted(verified, key=lambda item: item.confidence, reverse=True)[:3]
+    if lead_claims:
+        for claim in lead_claims:
+            findings.append(f"{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}：{compact_fact(best_claim_text(claim), 150)}")
+    elif claims:
+        findings.append("本轮 Red Team 尚未确认足够多的稳健 Claim；以下内容只能作为待验证观察和补证线索。")
 
     return findings[:5] or ["本次运行已形成基础证据库，但仍需要更多可交叉验证的高质量来源来支撑强结论。"]
 
@@ -2255,7 +2322,14 @@ def build_target_advantage_analysis(
                 f"- **{cell.dimension_label}**：当前公开证据偏弱，不能把它作为强结论；建议补充可被引用的论文、实验结果或最新进展。{cite}"
             )
     if not strengths:
-        lead_claims = sorted(claims, key=lambda item: item.confidence, reverse=True)[:3]
+        lead_claims = sorted(
+            [
+                claim for claim in claims
+                if claim.verification_status == "verified" and claim.risk_level != "high"
+            ],
+            key=lambda item: item.confidence,
+            reverse=True,
+        )[:3]
         strengths = [
             f"- {compact_fact(best_claim_text(claim), 180)}{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
             for claim in lead_claims
@@ -2291,7 +2365,11 @@ def build_user_attention_analysis(
             f"说明该方向已有论文反复使用这一类问题重构或机制设计。{cite}"
         )
     if not lines:
-        for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)[:4]:
+        verified_claims = [
+            claim for claim in claims
+            if claim.verification_status == "verified" and claim.risk_level != "high"
+        ]
+        for claim in sorted(verified_claims, key=lambda item: item.confidence, reverse=True)[:4]:
             lines.append(
                 f"- {compact_fact(best_claim_text(claim), 170)}"
                 f"{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
@@ -2330,8 +2408,12 @@ def build_risk_notes(
 ) -> list[str]:
     challenged = [claim for claim in claims if claim.verification_status != "verified"]
     gaps = build_evidence_gaps(matrix)
+    if observability.report_confidence >= 0.55 and observability.claim_pass_rate >= 0.2:
+        confidence_note = "适合用于方向判断；强学术结论仍应结合领域知识和原文复核"
+    else:
+        confidence_note = "仅适合作为探索性 pilot 和补证清单，不适合作为正式研究结论"
     lines = [
-        f"- 当前报告可信度约为 {observability.report_confidence:.0%}，适合用于方向判断；强学术结论仍应结合领域知识和原文复核。",
+        f"- 当前报告可信度约为 {observability.report_confidence:.0%}，{confidence_note}。",
     ]
     if challenged:
         lines.append(f"- 仍有 {len(challenged)} 条 Claim 未通过基础审查，报告正文已尽量采用保守措辞。")

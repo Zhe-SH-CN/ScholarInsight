@@ -1579,17 +1579,22 @@ class ReportComposerAgent(BaseAgent):
                 "- 任何'X在Y维度有Z条证据'的表述\n"
                 "\n"
                 "【报告质量要求】\n"
-                "1. 摘要要有真正的学术判断：哪些推理模式最突出、哪些论文机制最有启发、研究空白在哪里\n"
-                "2. 推理模式对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
-                "3. 每个模式分析要写对比性段落：说清楚论文间的瓶颈、机制、实验支撑和适用边界差异\n"
-                "4. 给出具体的、有据可查的结论——不要写'各有优劣'、'建议持续关注'这类无信息量的话\n"
-                "5. 研究建议要给出能直接指导后续研究的差异化方向，针对具体场景，避免模板化\n"
-                "6. 研究建议要可操作，结合推理模式分布说明为什么这么建议\n"
-                "7. 每个关键判断后用方括号标注来源编号，如[1][3]，不要暴露内部ID\n"
-                "8. 证据条目后附有（YYYY-MM）格式的发布月份标注；时效性敏感维度（资源需求、方法更新、研究动态）"
+                "1. 若 briefing notes 中 quality_context.report_mode 为 exploratory_pilot，标题或摘要第一句必须明确标注"
+                "这是探索性 pilot / 低置信报告；不得把待验证观察写成正式结论\n"
+                "2. 摘要中的强结论只能来自 top_claims；若 top_claims 为空，必须写明本轮未形成足够稳健的主结论\n"
+                "3. tentative_claims 只能放在'待验证观察'、'研究空白与风险'或'下一轮补证'语境，不得放入执行摘要强结论\n"
+                "4. 被 rejected 或 high risk 的 claim 不得作为结论或建议依据\n"
+                "5. 摘要要有真正的学术判断：哪些推理模式最突出、哪些论文机制最有启发、研究空白在哪里\n"
+                "6. 推理模式对比矩阵中每个格子只写简洁的文字判断（1句话），不写分数或证据条数\n"
+                "7. 每个模式分析要写对比性段落：说清楚论文间的瓶颈、机制、实验支撑和适用边界差异\n"
+                "8. 给出具体的、有据可查的结论——不要写'各有优劣'、'建议持续关注'这类无信息量的话\n"
+                "9. 研究建议要给出能直接指导后续研究的差异化方向，针对具体场景，避免模板化\n"
+                "10. 研究建议要可操作，结合推理模式分布说明为什么这么建议\n"
+                "11. 每个关键判断后用方括号标注来源编号，如[1][3]，不要暴露内部ID\n"
+                "12. 证据条目后附有（YYYY-MM）格式的发布月份标注；时效性敏感维度（资源需求、方法更新、研究动态）"
                 "优先引用较新的证据，若只有旧证据可用，应在报告中注明'截至YYYY年MM月'并提示信息可能已更新\n"
-                "9. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的学术分析。\n"
-                "10. 如果 briefing notes 对某个判断支持不足，请直接写'现有公开证据不足以判断'，不要补充想象。\n"
+                "13. 不要机械复述 briefing notes；要把证据转化成有判断、有取舍的学术分析。\n"
+                "14. 如果 briefing notes 对某个判断支持不足，请直接写'现有公开证据不足以判断'，不要补充想象。\n"
                 "\n"
                 "【报告结构】（Markdown格式）\n"
                 "# [报告标题]\n"
@@ -1731,23 +1736,53 @@ class ReportComposerAgent(BaseAgent):
                     }
                 )
 
-        top_claims: list[dict[str, Any]] = []
-        for claim in sorted(claims, key=lambda item: item.confidence, reverse=True):
-            if claim.verification_status == "rejected":
-                continue
+        claim_status_counts = Counter(claim.verification_status for claim in claims)
+        claim_risk_counts = Counter(note.risk_type for claim in claims for note in claim.red_team_notes)
+        failed_gates = [
+            {
+                "gate_id": gate.gate_id,
+                "name": gate.name,
+                "status": gate.status,
+                "message": gate.message,
+                "suggested_action": gate.suggested_action,
+            }
+            for gate in (observability.quality_gates if observability else [])
+            if gate.status == "fail"
+        ]
+        report_ready = bool(observability) and not failed_gates and (observability.claim_pass_rate >= 0.2)
+        if observability and observability.evidence_coverage_score < 0.25:
+            report_ready = False
+        report_mode = "publication_ready" if report_ready else "exploratory_pilot"
+
+        def claim_payload(claim: Claim, limit: int = 260) -> dict[str, Any] | None:
             citations = cite(claim.supporting_evidence_ids, 4)
             if not citations:
+                return None
+            return {
+                "dimension": DIMENSION_LABELS.get(claim.dimension, claim.dimension),
+                "claim": short(claim.final_wording or claim.claim, limit),
+                "reasoning": short(claim.reasoning_summary, 180),
+                "risk_level": claim.risk_level,
+                "verification_status": claim.verification_status,
+                "supporting_evidence_count": len(claim.supporting_evidence_ids),
+                "red_team_risks": [note.risk_type for note in claim.red_team_notes[:4]],
+                "citations": citations,
+            }
+
+        top_claims: list[dict[str, Any]] = []
+        tentative_claims: list[dict[str, Any]] = []
+        do_not_use_as_conclusions: list[dict[str, Any]] = []
+        for claim in sorted(claims, key=lambda item: item.confidence, reverse=True):
+            payload = claim_payload(claim)
+            if not payload:
                 continue
-            top_claims.append(
-                {
-                    "dimension": DIMENSION_LABELS.get(claim.dimension, claim.dimension),
-                    "claim": short(claim.final_wording or claim.claim, 260),
-                    "reasoning": short(claim.reasoning_summary, 180),
-                    "risk_level": claim.risk_level,
-                    "citations": citations,
-                }
-            )
-            if len(top_claims) >= 24:
+            if claim.verification_status == "verified" and claim.risk_level != "high":
+                top_claims.append(payload)
+            elif claim.verification_status in {"needs_evidence", "challenged"} and claim.risk_level != "high":
+                tentative_claims.append(payload)
+            else:
+                do_not_use_as_conclusions.append(payload)
+            if len(top_claims) >= 12 and len(tentative_claims) >= 18 and len(do_not_use_as_conclusions) >= 8:
                 break
 
         from collections import defaultdict
@@ -1806,13 +1841,27 @@ class ReportComposerAgent(BaseAgent):
                 "evidence_count": metrics.evidence_count,
                 "claim_count": metrics.claim_count,
                 "verified_claim_count": metrics.verified_claim_count,
+                "challenged_claim_count": metrics.challenged_claim_count,
             },
             "quality_context": {
+                "report_mode": report_mode,
                 "source_mix": observability.source_mix if observability else {},
                 "report_confidence": observability.report_confidence if observability else None,
+                "claim_pass_rate": observability.claim_pass_rate if observability else 0,
+                "red_team_challenge_rate": observability.red_team_challenge_rate if observability else 0,
+                "evidence_coverage_score": observability.evidence_coverage_score if observability else 0,
+                "claim_status_counts": dict(claim_status_counts),
+                "claim_risk_counts": dict(claim_risk_counts),
+                "failed_gates": failed_gates,
+                "claim_use_policy": (
+                    "Use top_claims as main conclusions. Use tentative_claims only as hypotheses or observations "
+                    "that require more evidence. Never use do_not_use_as_conclusions as report conclusions."
+                ),
             },
             "matrix_cells": matrix_cells,
             "top_claims": top_claims,
+            "tentative_claims": tentative_claims[:18],
+            "do_not_use_as_conclusions": do_not_use_as_conclusions[:8],
             "representative_evidence": evidence_brief,
             "recommendations": [
                 {
@@ -1841,6 +1890,37 @@ class ReportComposerAgent(BaseAgent):
         if not self.llm_enabled:
             raise RuntimeError("LLM is not configured; executive summary generation cannot continue")
 
+        failed_gates = [
+            gate.model_dump(mode="json")
+            for gate in observability.quality_gates
+            if gate.status == "fail"
+        ]
+        report_ready = not failed_gates and observability.claim_pass_rate >= 0.2
+        if observability.evidence_coverage_score < 0.25:
+            report_ready = False
+
+        def summary_claim(claim: Claim) -> dict[str, Any]:
+            return {
+                "dimension": DIMENSION_LABELS.get(claim.dimension, claim.dimension),
+                "claim": claim.final_wording or claim.claim,
+                "confidence": claim.confidence,
+                "risk_level": claim.risk_level,
+                "verification_status": claim.verification_status,
+                "supporting_evidence_count": len(claim.supporting_evidence_ids),
+                "red_team_risks": [note.risk_type for note in claim.red_team_notes[:4]],
+            }
+
+        verified_claims = [
+            summary_claim(claim)
+            for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
+            if claim.verification_status == "verified" and claim.risk_level != "high"
+        ][:12]
+        tentative_claims = [
+            summary_claim(claim)
+            for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)
+            if claim.verification_status in {"needs_evidence", "challenged"} and claim.risk_level != "high"
+        ][:12]
+
         context = {
             "project": request.project_name,
             "target_topic": request.target_topic,
@@ -1849,21 +1929,24 @@ class ReportComposerAgent(BaseAgent):
             "metrics": metrics.model_dump(mode="json"),
             "coverage_by_dimension": matrix.coverage_by_dimension,
             "coverage_by_paper": matrix.coverage_by_paper,
-            "report_confidence": observability.report_confidence,
+            "quality_context": {
+                "report_mode": "publication_ready" if report_ready else "exploratory_pilot",
+                "report_confidence": observability.report_confidence,
+                "claim_pass_rate": observability.claim_pass_rate,
+                "red_team_challenge_rate": observability.red_team_challenge_rate,
+                "evidence_coverage_score": observability.evidence_coverage_score,
+                "claim_status_counts": dict(Counter(claim.verification_status for claim in claims)),
+                "failed_gates": failed_gates,
+            },
             "top_recommendations": [
                 item.model_dump(mode="json") for item in recommendations[:6]
             ],
-            "claims": [
-                {
-                    "dimension": DIMENSION_LABELS.get(claim.dimension, claim.dimension),
-                    "claim": claim.final_wording or claim.claim,
-                    "confidence": claim.confidence,
-                    "risk_level": claim.risk_level,
-                    "verification_status": claim.verification_status,
-                    "supporting_evidence_count": len(claim.supporting_evidence_ids),
-                }
-                for claim in sorted(claims, key=lambda item: item.confidence, reverse=True)[:24]
-            ],
+            "verified_claims": verified_claims,
+            "tentative_claims": tentative_claims,
+            "claim_use_policy": (
+                "Key Findings may only use verified_claims. Tentative claims require validation and must be "
+                "labeled as observations, not conclusions."
+            ),
             "evidence_samples": [
                 {
                     "dimension": item.dimension_label,
@@ -1882,8 +1965,10 @@ class ReportComposerAgent(BaseAgent):
                 "你是推理模式研究报告的执行摘要写作者。请只基于输入中的证据、Claim、矩阵覆盖和建议来写，"
                 "不要编造额外事实，不要暴露 ev_ ID，不要写模板化空话。"
                 "输出中文 Markdown，结构为：# Summary、## Key Findings、## Recommended Moves、## Confidence Notes。"
-                "Key Findings 必须是有判断的 3-5 条结论；Recommended Moves 写 2-4 条可执行建议；"
-                "Confidence Notes 简要说明哪些结论较稳、哪些仍需补证。"
+                "Key Findings 只能使用 verified_claims；如果 verified_claims 为空，必须明确写本轮没有足够稳健结论。"
+                "tentative_claims 只能写入 Confidence Notes 或待验证观察，不能写成发现。"
+                "若 quality_context.report_mode 是 exploratory_pilot，Summary 第一段必须标注这是探索性 pilot。"
+                "Recommended Moves 写 2-4 条可执行建议；Confidence Notes 简要说明哪些结论较稳、哪些仍需补证。"
             ),
             user=json.dumps(context, ensure_ascii=False, default=str)[:24000],
         )

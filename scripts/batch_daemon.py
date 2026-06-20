@@ -14,6 +14,7 @@ ScholarInsight 24/7 批量蒸馏 Daemon。
 
   # Smoke test（只跑一个话题）
   cd backend && uv run python ../scripts/batch_daemon.py --smoke-test
+  cd backend && uv run python ../scripts/batch_daemon.py --pilot-count 3
 """
 from __future__ import annotations
 
@@ -96,7 +97,7 @@ def log_error(topic: str, error: str) -> None:
 
 def topic_run_id(index: int, topic: str) -> str:
     """Stable folder name: 001_Topic_Name."""
-    slug = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in topic)
+    slug = "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in topic)
     slug = "_".join(part for part in slug.split("_") if part)
     return f"{index:03d}_{slug[:72].rstrip('_') or 'topic'}"
 
@@ -387,7 +388,12 @@ async def main() -> None:
     """主循环。"""
     parser = argparse.ArgumentParser(description="ScholarInsight batch daemon")
     parser.add_argument("--smoke-test", action="store_true", help="只跑一个话题进行测试")
+    parser.add_argument("--pilot-count", type=int, default=0, help="只跑前 N 个尚未完成的话题")
     args = parser.parse_args()
+    if args.pilot_count < 0:
+        parser.error("--pilot-count must be >= 0")
+    if args.smoke_test and args.pilot_count:
+        parser.error("--smoke-test and --pilot-count cannot be used together")
 
     topics = load_topics()
     progress = load_progress()
@@ -407,13 +413,17 @@ async def main() -> None:
     if args.smoke_test:
         pending = pending[:1]
         print(f"Smoke test 模式：只跑 {pending[0]['index']}. {pending[0]['topic']}")
+    elif args.pilot_count:
+        pending = pending[:args.pilot_count]
+        print(f"Pilot 模式：只跑前 {len(pending)} 个未完成话题")
 
     if not progress["started_at"]:
         progress["started_at"] = datetime.now(timezone.utc).isoformat()
 
     settings = Settings()
     pipeline = ResearchPipeline(settings)
-    semaphore = asyncio.Semaphore(1 if args.smoke_test else MAX_CONCURRENT)
+    concurrency = 1 if args.smoke_test else MAX_CONCURRENT
+    semaphore = asyncio.Semaphore(concurrency)
     start_time = time.time()
     batch_count = 0
     save_progress(progress)
@@ -422,8 +432,8 @@ async def main() -> None:
     monitor = asyncio.create_task(monitor_topic_progress(topics, progress, settings, stop_monitor))
 
     try:
-        for i in range(0, len(pending), MAX_CONCURRENT):
-            batch = pending[i:i + MAX_CONCURRENT]
+        for i in range(0, len(pending), concurrency):
+            batch = pending[i:i + concurrency]
             tasks = [
                 run_topic(
                     pipeline,

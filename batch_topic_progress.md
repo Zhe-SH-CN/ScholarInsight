@@ -3,16 +3,16 @@
 This file is maintained by `scripts/batch_daemon.py` during batch runs.
 
 - Topics: 132
-- Completed: 1
+- Completed: 4
 - Failed: 0
-- Last refresh: 2026-06-19 12:48:37 UTC
+- Last refresh: 2026-06-20 00:50:59 UTC
 
 | No. | Topic | Status | Run folder | Checkpoint | Claims | Verified | Needs evidence | Challenged | Rejected | Single source | Insufficient evidence | Wording risk | Over-inference | Other risks | Updated | Error |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | Knowledge Graphs Construction | Done | 001_Knowledge_Graphs_Construction |  | 80 | 4 | 89 | 76 | 3 | 84 | 66 | 52 | 18 | 64 | 2026-06-19 12:48:37 UTC |  |
-| 2 | Dynamic Knowledge Graphs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 3 | Knowledge-Grounded Generation | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
-| 4 | RAG with Knowledge Graphs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
+| 1 | Knowledge Graphs Construction | Done | 001_Knowledge_Graphs_Construction |  | 80 | 4 | 89 | 76 | 3 | 84 | 66 | 52 | 18 | 64 | 2026-06-20 00:50:59 UTC |  |
+| 2 | Dynamic Knowledge Graphs | Done | 002_Dynamic_Knowledge_Graphs |  | 80 | 6 | 250 | 74 | 1 | 202 | 157 | 146 | 8 | 255 | 2026-06-20 00:50:59 UTC |  |
+| 3 | Knowledge-Grounded Generation | Done | 003_Knowledge_Grounded_Generation |  | 80 | 3 | 144 | 77 | 0 | 125 | 60 | 70 | 4 | 135 | 2026-06-20 00:50:59 UTC |  |
+| 4 | RAG with Knowledge Graphs | Done | 004_RAG_with_Knowledge_Graphs |  | 80 | 1 | 259 | 79 | 2 | 220 | 124 | 125 | 24 | 232 | 2026-06-20 00:50:59 UTC |  |
 | 5 | Scientific Reasoning with LLMs | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
 | 6 | Mathematical Reasoning | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
 | 7 | Logical Reasoning with Language Models | Waiting |  |  | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |  |  |
