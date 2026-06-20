@@ -3960,50 +3960,62 @@ def profile_summary(
     )
 
 
+def sorted_report_ready_claims(claims: list[Claim], limit: int | None = None) -> list[Claim]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            len(item.supporting_evidence_ids),
+            item.confidence,
+        ),
+        reverse=True,
+    )
+    return ready_claims[:limit] if limit is not None else ready_claims
+
+
 def build_core_findings(request: ResearchRequest, matrix: PaperPatternMatrix, claims: list[Claim]) -> list[str]:
-    findings: list[str] = []
-    target = request.target_topic
-    by_paper = {profile.paper: profile for profile in matrix.profiles}
-    target_profile = by_paper.get(target)
-    if target_profile:
-        strong = "、".join(target_profile.strongest_dimensions[:3]) or "暂无强覆盖维度"
-        weak = "、".join(target_profile.weak_or_unknown_dimensions[:3]) or "暂无明显缺口"
-        findings.append(
-            f"{target} 的证据画像目前最集中在 {strong}；需要谨慎解读或继续补证的方向是 {weak}。"
+    ready_claims = sorted_report_ready_claims(claims, limit=3)
+    if ready_claims:
+        lead_claim = ready_claims[0]
+        axis = (
+            cluster_axis_phrase(lead_claim.evidence_cluster_label)
+            if lead_claim.evidence_cluster_label
+            else DIMENSION_LABELS.get(lead_claim.dimension, lead_claim.dimension)
         )
+        dimensions = "、".join(
+            unique_strings([DIMENSION_LABELS.get(claim.dimension, claim.dimension) for claim in ready_claims])
+        )
+        role_text = role_backing_phrase(lead_claim) or f"{lead_claim.source_paper_count} 篇独立论文"
+        return [
+            f"背景：{request.target_topic} 当前已有可进入主体的证据轴，主要落在 {dimensions}；这些内容适合作为研究问题入口，而不是直接写成领域趋势。",
+            f"缺口：最稳健的切入点是把“{axis}”从综述观察转为可复现实验变量；当前由 {role_text} 支撑。",
+            f"方法假设：{submission_method_hypothesis(request, lead_claim)}",
+            "贡献边界：主体结论只接收通过 `g(c)` 证据门控的 claim；未满足多论文、同轴证据或 source-role 条件的观察保留为补证 backlog。",
+        ]
 
     strongest_dimension = sorted(
         matrix.coverage_by_dimension.items(),
         key=lambda item: item[1],
         reverse=True,
     )
+    if claims:
+        return ["本轮 Red Team 尚未确认足够多的稳健 Claim；以下内容只能作为待验证观察和补证线索。"]
     if strongest_dimension:
         label = matrix.dimension_labels.get(strongest_dimension[0][0], strongest_dimension[0][0])
-        findings.append(f"本次资料覆盖最充分的维度是 {label}，覆盖度约 {strongest_dimension[0][1]:.0%}。")
-
-    verified = [
-        claim for claim in claims
-        if is_report_ready_claim(claim)
-    ]
-    lead_claims = sorted(verified, key=lambda item: item.confidence, reverse=True)[:3]
-    if lead_claims:
-        for claim in lead_claims:
-            findings.append(f"{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}：{compact_fact(best_claim_text(claim), 300)}")
-    elif claims:
-        findings.append("本轮 Red Team 尚未确认足够多的稳健 Claim；以下内容只能作为待验证观察和补证线索。")
-
-    return findings[:5] or ["本次运行已形成基础证据库，但仍需要更多可交叉验证的高质量来源来支撑强结论。"]
+        return [f"本次资料覆盖最充分的维度是 {label}，覆盖度约 {strongest_dimension[0][1]:.0%}，但仍缺少 report-ready synthesis。"]
+    return ["本次运行已形成基础证据库，但仍需要更多可交叉验证的高质量来源来支撑强结论。"]
 
 
-def report_ready_finding_lines(claims: list[Claim], limit: int = 3, max_len: int = 300) -> list[str]:
-    ready_claims = sorted(
-        [claim for claim in claims if is_report_ready_claim(claim)],
-        key=lambda item: (item.confidence, item.source_paper_count, len(item.supporting_evidence_ids)),
-        reverse=True,
-    )[:limit]
+def report_ready_finding_lines(
+    request: ResearchRequest,
+    claims: list[Claim],
+    limit: int = 3,
+) -> list[str]:
+    ready_claims = sorted_report_ready_claims(claims, limit=limit)
     return [
         f"- **{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}**："
-        f"{compact_fact(best_claim_text(claim), max_len)}"
+        f"{submission_problem_statement(request, claim)}"
         for claim in ready_claims
     ]
 
@@ -4712,7 +4724,8 @@ def build_target_advantage_analysis(
             reverse=True,
         )[:3]
         strengths = [
-            f"- {compact_fact(best_claim_text(claim), 180)}{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
+            f"- **{DIMENSION_LABELS.get(claim.dimension, claim.dimension)}**："
+            f"{submission_problem_statement(request, claim)}{citations_for_ids(claim.supporting_evidence_ids, citation_numbers)}"
             for claim in lead_claims
         ] or [f"- 暂未形成 {request.target_topic} 的强研究结论，应优先补齐相关论文和最新进展。"]
     if not weaknesses:
@@ -5174,7 +5187,7 @@ def build_executive_summary(
     recommendations: list[OpportunityRecommendation],
     claims: list[Claim] | None = None,
 ) -> str:
-    ready_findings = report_ready_finding_lines(claims or [], limit=3, max_len=300) if claims is not None else []
+    ready_findings = report_ready_finding_lines(request, claims or [], limit=3) if claims is not None else []
     lines = [
         f"# {request.project_name} · Executive Summary",
         "",

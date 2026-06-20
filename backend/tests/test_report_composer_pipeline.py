@@ -240,7 +240,8 @@ async def test_write_report_fallback_splits_report_ready_and_audit_only_claims(
 
     summary = (run_dir / "reports" / "executive_summary.md").read_text(encoding="utf-8")
     assert "## Report-ready Findings" in summary
-    assert "identifiability assumptions across counterfactual inference protocols" in summary
+    assert "当前证据不是支持泛化结论" in summary
+    assert "可被任务化的“核心反事实推断”瓶颈" in summary
     assert "当前样本内" not in summary
 
     report = (run_dir / "reports" / "report.md").read_text(encoding="utf-8")
@@ -302,7 +303,8 @@ def test_report_ready_summary_keeps_cross_role_contrast_readable() -> None:
     )
 
     assert "## Report-ready Findings" in summary
-    assert "scientific discovery agent/workflow 来源（2 篇）侧重 agent workflow、工具调用和研究流程编排" in summary
+    assert "source-role 分工" in summary
+    assert "scientific discovery agent/workflow 2 篇" in summary
     assert "age..." not in summary
     assert "agent..." not in summary
 
@@ -331,6 +333,11 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
         _observability(),
     )
 
+    summary_block = report.split("## 推理模式对比矩阵", 1)[0]
+    assert "背景：Counterfactual Inference 当前已有可进入主体的证据轴" in summary_block
+    assert "缺口：最稳健的切入点是把“核心反事实推断”从综述观察转为可复现实验变量" in summary_block
+    assert "贡献边界：主体结论只接收通过 `g(c)` 证据门控的 claim" in summary_block
+    assert "Multiple counterfactual inference papers organize evidence" not in summary_block
     assert "## 可检验研究假设与学术背书" in report
     assert "## 证据背书机会表" in report
     assert "## 形式化证据门控与数学背书" in report
