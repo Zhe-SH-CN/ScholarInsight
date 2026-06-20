@@ -2,7 +2,6 @@
 set -Eeuo pipefail
 
 export PATH="/root/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-export UV_DEFAULT_INDEX="${UV_DEFAULT_INDEX:-https://mirrors.aliyun.com/pypi/simple/}"
 
 ARCHIVE="${1:-/tmp/scholarinsight.tar.gz}"
 APP_ROOT="${2:-/mnt/scholarinsight}"
@@ -73,7 +72,7 @@ install_backend() {
   cd "$APP_DIR/backend"
   rm -rf .venv
   uv python install "$PYTHON_VERSION"
-  uv sync --python "$PYTHON_VERSION" --index-url "$UV_DEFAULT_INDEX"
+  uv sync --python "$PYTHON_VERSION"
 }
 
 write_systemd_service() {
@@ -88,6 +87,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=${APP_DIR}/backend
 Environment=PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+Environment=HF_ENDPOINT=https://huggingface.co
 Environment=PYTHONUNBUFFERED=1
 Environment=UV_PYTHON=${PYTHON_VERSION}
 ExecStart=/usr/bin/env uv run --python ${PYTHON_VERSION} uvicorn cg.main:app --host 127.0.0.1 --port ${BACKEND_PORT}
