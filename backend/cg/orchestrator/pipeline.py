@@ -1241,41 +1241,50 @@ class ResearchPipeline:
             for document, deterministic in candidates_for_extraction
         ]
         try:
-            for extraction_task in asyncio.as_completed(extraction_tasks):
+            pending_tasks = set(extraction_tasks)
+            while pending_tasks:
                 await self.check_stop(run_id)
-                document, extracted = await extraction_task
-                completed_documents += 1
-                saved_for_document = 0
-                for item in extracted:
-                    if item.paper and item.dimension:
-                        key = (item.paper, item.dimension)
-                        if evidence_cell_sufficient(coverage_counts.get(key, 0)):
-                            continue
-                        coverage_counts[key] = coverage_counts.get(key, 0) + 1
-                    await repo.save(item)
-                    evidence_items.append(item)
-                    saved_for_document += 1
-                await self.trace(
-                    run_id,
-                    "EvidenceStructuringAgent",
-                    "progress",
-                    "extracted",
-                    f"从「{document.title}」抽取 {saved_for_document} 条 Evidence（{completed_documents}/{total_candidates}）",
-                    {
-                        "url": document.url,
-                        "title": document.title,
-                        "count": saved_for_document,
-                        "provider": document.provider,
-                        "content_source": document.content_source,
-                        "completed_documents": completed_documents,
-                        "total_documents": total_candidates,
-                    },
+                done_tasks, pending_tasks = await asyncio.wait(
+                    pending_tasks,
+                    timeout=1.0,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
-                if completed_documents == 1 or completed_documents % 5 == 0 or completed_documents == total_candidates:
-                    current_status = await self.runs.load_status(run_id)
-                    if current_status.status == "running":
-                        current_status.metrics.evidence_count = existing_count + len(evidence_items)
-                        await self.runs.save_status(current_status)
+                if not done_tasks:
+                    continue
+                for extraction_task in done_tasks:
+                    document, extracted = await extraction_task
+                    completed_documents += 1
+                    saved_for_document = 0
+                    for item in extracted:
+                        if item.paper and item.dimension:
+                            key = (item.paper, item.dimension)
+                            if evidence_cell_sufficient(coverage_counts.get(key, 0)):
+                                continue
+                            coverage_counts[key] = coverage_counts.get(key, 0) + 1
+                        await repo.save(item)
+                        evidence_items.append(item)
+                        saved_for_document += 1
+                    await self.trace(
+                        run_id,
+                        "EvidenceStructuringAgent",
+                        "progress",
+                        "extracted",
+                        f"从「{document.title}」抽取 {saved_for_document} 条 Evidence（{completed_documents}/{total_candidates}）",
+                        {
+                            "url": document.url,
+                            "title": document.title,
+                            "count": saved_for_document,
+                            "provider": document.provider,
+                            "content_source": document.content_source,
+                            "completed_documents": completed_documents,
+                            "total_documents": total_candidates,
+                        },
+                    )
+                    if completed_documents == 1 or completed_documents % 5 == 0 or completed_documents == total_candidates:
+                        current_status = await self.runs.load_status(run_id)
+                        if current_status.status == "running":
+                            current_status.metrics.evidence_count = existing_count + len(evidence_items)
+                            await self.runs.save_status(current_status)
         finally:
             for task in extraction_tasks:
                 if not task.done():
@@ -1736,7 +1745,6 @@ SYNTHESIS_SOURCE_ROLES = {
     "core_multi_hop_graph_reasoning",
     "kgqa_or_graph_reasoning",
     "graph_reasoning_benchmark",
-    "graph_retrieval_rag_adjacent",
 }
 
 SOURCE_ROLE_LABELS = {

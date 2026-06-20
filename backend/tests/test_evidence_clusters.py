@@ -118,6 +118,85 @@ def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
     assert reviewed[0].risk_level == "medium"
 
 
+def test_graph_rag_adjacent_sources_do_not_create_core_synthesis() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Graph RAG Paper A",
+            "inference_time_control",
+            "Graph-RAG search traversal retrieves paths for LLM answers.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+        _evidence(
+            "ev_a2",
+            "Graph RAG Paper A",
+            "inference_time_control",
+            "The system uses search and retrieval over graph context.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+        _evidence(
+            "ev_b1",
+            "Graph RAG Paper B",
+            "inference_time_control",
+            "RAG over knowledge graphs uses search to improve answer grounding.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+        _evidence(
+            "ev_b2",
+            "Graph RAG Paper B",
+            "inference_time_control",
+            "The method is evaluated as retrieval-augmented generation with graph search.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+    ]
+    clusters = build_evidence_clusters(evidence)
+
+    claims = build_claims_from_clusters("run_test", clusters, evidence)
+
+    assert [claim.claim_type for claim in claims] == [
+        "single_paper_observation",
+        "single_paper_observation",
+    ]
+    assert not [claim for claim in claims if claim.claim_type == "comparative"]
+
+
+def test_claim_discipline_backlogs_graph_rag_adjacent_verified_claims() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Graph RAG Paper A",
+            "inference_time_control",
+            "Graph-RAG traversal retrieves paths for LLM answers.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+        _evidence(
+            "ev_b1",
+            "Graph RAG Paper B",
+            "inference_time_control",
+            "RAG over knowledge graphs improves answer grounding.",
+            source_subtype="graph_retrieval_rag_adjacent",
+        ),
+    ]
+    claim = Claim(
+        claim_id="claim_graph_rag",
+        run_id="run_test",
+        dimension="inference_time_control",
+        dimension_label="inference_time_control",
+        claim="Graph-RAG papers support a multi-hop graph reasoning pattern.",
+        supporting_evidence_ids=["ev_a1", "ev_b1"],
+        confidence=0.8,
+        risk_level="low",
+        reasoning_summary="Supported by two papers.",
+        verification_status="verified",
+    )
+
+    reviewed = apply_claim_discipline([claim], evidence)
+
+    assert reviewed[0].verification_status == "needs_evidence"
+    assert reviewed[0].backlog_reason == "unsupported_source_role"
+    assert reviewed[0].risk_level == "medium"
+
+
 def test_evidence_clusters_track_verified_claims() -> None:
     evidence = [
         _evidence("ev_a1", "Paper A", "formal_experimental_tightening", "Ablation validates the method."),
