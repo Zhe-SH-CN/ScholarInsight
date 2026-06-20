@@ -576,6 +576,30 @@ def test_causal_reasoning_llm_gate_rejects_rlvr_testbed_drift() -> None:
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_opinion_alignment_drift() -> None:
+    paper = {
+        "title": "Reasoning Boosts Opinion Alignment in LLMs",
+        "abstract": (
+            "Opinion modeling aims to capture individual or group political preferences, "
+            "enabling applications such as digital democracies. The work studies large "
+            "language models and preference alignment rather than causal reasoning ability."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/opinion_alignment.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs robustness confounding",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
 def test_causal_reasoning_llm_gate_keeps_agent_counterfactuals_out_of_benchmark_role() -> None:
     paper = {
         "title": "Abstract Counterfactuals for Language Model Agents",
