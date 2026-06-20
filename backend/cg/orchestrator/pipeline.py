@@ -1441,7 +1441,7 @@ class ResearchPipeline:
         repo = EvidenceRepository(self.runs.run_dir(run_id))
         evidence_items: list[Evidence] = []
         dimensions = plan.dimensions or request.analysis_dimensions or DEFAULT_DIMENSIONS
-        entities = [request.target_topic]
+        entities = unique_strings(request.seed_papers)
         agent = EvidenceStructuringAgent(self.agent_context(run_id))
         coverage_counts = evidence_coverage_counts(existing_evidence or [], entities, dimensions)
         skipped_documents = 0
@@ -3699,7 +3699,7 @@ def extract_evidence_from_document(
             if sentence in used_quotes or len(sentence) < 45:
                 continue
             used_quotes.add(sentence)
-            paper = detect_entity(sentence, document.title, document.url, entities) or document.title
+            paper = document.title or detect_entity(sentence, document.title, document.url, entities)
             quote = sentence[:500]
             fact = build_fact(quote, paper, dimension)
             confidence = min(0.95, 0.38 + score * 0.09 + source_weight(document.source_type))
@@ -3732,7 +3732,7 @@ def extract_evidence_from_document(
             break
     if not evidence_items and sentences:
         sentence = max(sentences, key=len)[:500]
-        paper = detect_entity(sentence, document.title, document.url, entities) or document.title
+        paper = document.title or detect_entity(sentence, document.title, document.url, entities)
         evidence_items.append(
             Evidence(
                 evidence_id=stable_id("ev", f"{run_id}:{document.url}:real_text:{sentence}"),
@@ -4043,7 +4043,7 @@ def build_analysis_report(
         "",
         "### 矩阵解读",
         "",
-        *build_matrix_insights(matrix),
+        *build_matrix_insights(matrix, claims, citation_numbers),
         "",
         "## 证据背书机会表",
         "",
@@ -4438,7 +4438,41 @@ def build_risk_notes(
     return lines
 
 
-def build_matrix_insights(matrix: PaperPatternMatrix) -> list[str]:
+def build_matrix_insights(
+    matrix: PaperPatternMatrix,
+    claims: list[Claim] | None = None,
+    citation_numbers: dict[str, int] | None = None,
+) -> list[str]:
+    citation_numbers = citation_numbers or {}
+    ready_claims = sorted(
+        [claim for claim in (claims or []) if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            item.confidence,
+        ),
+        reverse=True,
+    )
+    if ready_claims:
+        lines: list[str] = []
+        for claim in ready_claims[:6]:
+            dimension = matrix.dimension_labels.get(claim.dimension, DIMENSION_LABELS.get(claim.dimension, claim.dimension))
+            axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else dimension
+            role_text = role_backing_phrase(claim) or f"{claim.source_paper_count} 篇独立论文"
+            citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=3)
+            if claim.claim_type == "cross_role_contrast":
+                lines.append(
+                    f"- **{dimension}**：主要可写结论来自“{axis}”上的来源角色分工，"
+                    f"当前由 {role_text} 支撑；矩阵覆盖度只作为审计背景，不应替代这一证据轴。{citations}"
+                )
+            else:
+                lines.append(
+                    f"- **{dimension}**：已有 report-ready evidence axis “{axis}”，"
+                    f"当前由 {role_text} 支撑；报告主体应围绕该轴组织研究假设和验证计划，"
+                    f"矩阵覆盖度只作为审计背景。{citations}"
+                )
+        return lines
+
     lines: list[str] = []
     for dimension in matrix.dimensions:
         cells = sorted(

@@ -284,7 +284,7 @@ async def audit_topic(
             if document is None:
                 continue
             documents.append(document)
-            evidence.extend(extract_evidence_from_document(run_id, document, dimensions, [topic]))
+            evidence.extend(extract_evidence_from_document(run_id, document, dimensions, []))
         clusters = build_evidence_clusters(evidence)
         claims = build_claims_from_clusters(run_id, clusters, evidence, limit=claim_limit)
         claims = prepare_claims_for_review(claims, evidence)

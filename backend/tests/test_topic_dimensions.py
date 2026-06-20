@@ -163,6 +163,8 @@ def test_deterministic_evidence_uses_mathematical_topic_dimensions() -> None:
     assert "other" not in dimensions
     assert "math_benchmark_evaluation" in dimensions
     assert "formal_proof_symbolic_reasoning" in dimensions
+    assert {item.paper for item in evidence} == {"Math Proof Benchmark"}
+    assert all(item.fact.startswith("Math Proof Benchmark 在") for item in evidence)
 
 
 def _source_document(title: str, content: str, source_subtype: str) -> SourceDocument:

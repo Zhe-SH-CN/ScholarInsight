@@ -405,6 +405,19 @@ def test_dimension_fallback_does_not_expand_unknown_cells() -> None:
     assert "Paper With No Evidence 的核心反事实推断强证据" not in rendered
 
 
+def test_matrix_insights_prefer_report_ready_evidence_axes() -> None:
+    insights = pipeline_module.build_matrix_insights(
+        _large_matrix_for_report_ready(),
+        [_report_ready_claim()],
+        {},
+    )
+
+    rendered = "\n".join(insights)
+    assert "report-ready evidence axis" in rendered
+    assert "矩阵覆盖度只作为审计背景" in rendered
+    assert "需要补证" not in rendered
+
+
 def _evidence() -> Evidence:
     now = datetime.now(timezone.utc)
     return Evidence(
