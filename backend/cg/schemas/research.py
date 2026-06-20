@@ -399,6 +399,8 @@ class Claim(BaseModel):
     claim_type: str = "descriptive"
     source_paper_count: int = 0
     evidence_support_level: str = "unknown"
+    supporting_source_subtypes: list[str] = Field(default_factory=list)
+    supporting_source_subtype_counts: dict[str, int] = Field(default_factory=dict)
     evidence_cluster_id: str = ""
     evidence_cluster_label: str = ""
     backlog_reason: str = ""

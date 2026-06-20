@@ -79,6 +79,8 @@ def test_cluster_claims_synthesize_only_same_source_role() -> None:
     assert "KGQA/graph reasoning" in claim.claim
     assert "提供了相近证据" not in claim.claim
     assert set(claim.supporting_evidence_ids) == {"ev_a1", "ev_b1"}
+    assert claim.supporting_source_subtypes == ["kgqa_or_graph_reasoning"]
+    assert claim.supporting_source_subtype_counts == {"kgqa_or_graph_reasoning": 2}
 
 
 def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
@@ -116,6 +118,8 @@ def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
     assert reviewed[0].verification_status == "needs_evidence"
     assert reviewed[0].backlog_reason == "unsupported_source_role"
     assert reviewed[0].risk_level == "medium"
+    assert reviewed[0].supporting_source_subtypes == ["causal_inference_adjacent"]
+    assert reviewed[0].supporting_source_subtype_counts == {"causal_inference_adjacent": 2}
 
 
 def test_graph_rag_adjacent_sources_do_not_create_core_synthesis() -> None:

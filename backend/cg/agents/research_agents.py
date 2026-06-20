@@ -1239,10 +1239,14 @@ class AnalysisAndReviewAgent(BaseAgent):
 
             # 推断 claim 类型（不依赖 LLM 输出）
             supporting_papers = set()
+            supporting_source_subtypes = []
             for ev_id in supporting:
                 ev = evidence_by_id.get(ev_id)
                 if ev and ev.paper:
                     supporting_papers.add(ev.paper)
+                if ev and ev.source_subtype:
+                    supporting_source_subtypes.append(ev.source_subtype)
+            source_subtype_counts = dict(sorted(Counter(supporting_source_subtypes).items()))
 
             # 自动推断 claim_type
             if len(supporting_papers) >= 2:
@@ -1283,6 +1287,8 @@ class AnalysisAndReviewAgent(BaseAgent):
                     claim_type=claim_type,
                     source_paper_count=len(supporting_papers),
                     evidence_support_level=support_level,
+                    supporting_source_subtypes=sorted(source_subtype_counts),
+                    supporting_source_subtype_counts=source_subtype_counts,
                     backlog_reason="single_evidence_claim" if claim_type == "backlog" else "",
                     verification_status="draft",
                     generated_by_agent=self.name,

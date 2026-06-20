@@ -1601,6 +1601,7 @@ def build_claim_from_support(
     source_types = sorted({ev.source_type for ev in supporting})
     source_count = len({ev.source_url for ev in supporting})
     paper_count = len({paper_key(ev) for ev in supporting})
+    source_role_counts = claim_source_role_counts(supporting)
     claim_type = "comparative" if paper_count >= 2 else "single_paper_observation"
     support_level = evidence_support_level(len(supporting), paper_count)
     confidence = min(0.92, average([ev.confidence for ev in supporting]) * min(1.0, 0.65 + len(supporting) * 0.08))
@@ -1617,6 +1618,8 @@ def build_claim_from_support(
         claim_type=claim_type,
         source_paper_count=paper_count,
         evidence_support_level=support_level,
+        supporting_source_subtypes=sorted(source_role_counts),
+        supporting_source_subtype_counts=source_role_counts,
         verification_status="draft",
     )
 
@@ -2096,6 +2099,11 @@ def evidence_support_level(evidence_count: int, paper_count: int) -> str:
     return "weak"
 
 
+def claim_source_role_counts(supporting: list[Evidence]) -> dict[str, int]:
+    counts = Counter(ev.source_subtype or "unclassified" for ev in supporting)
+    return dict(sorted(counts.items()))
+
+
 def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> list[Claim]:
     by_id = {ev.evidence_id: ev for ev in evidence}
     for claim in claims:
@@ -2103,8 +2111,11 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
         paper_count = len({paper_key(ev) for ev in supporting})
         source_roles = {ev.source_subtype for ev in supporting if ev.source_subtype}
         reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
+        source_role_counts = claim_source_role_counts(supporting)
         claim.source_paper_count = paper_count
         claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
+        claim.supporting_source_subtypes = sorted(source_role_counts)
+        claim.supporting_source_subtype_counts = source_role_counts
         if paper_count >= 2:
             claim.claim_type = "comparative"
         elif len(supporting) >= 2:
@@ -2156,6 +2167,8 @@ def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[di
                 "source_paper_count": claim.source_paper_count,
                 "supporting_evidence_count": len(claim.supporting_evidence_ids),
                 "supporting_papers": sorted({paper_key(ev) for ev in supporting}),
+                "supporting_source_subtypes": claim.supporting_source_subtypes,
+                "supporting_source_subtype_counts": claim.supporting_source_subtype_counts,
                 "claim": claim.final_wording or claim.claim,
                 "red_team_notes": [note.model_dump(mode="json") for note in claim.red_team_notes],
                 "supporting_evidence_ids": claim.supporting_evidence_ids,
