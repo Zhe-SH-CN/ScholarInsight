@@ -2433,7 +2433,7 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
     for cluster in candidate_clusters:
         for supporting in select_atomic_observation_supports(cluster, by_id):
             paper = paper_key(supporting[0])
-            best_fact = compact_fact(supporting[0].fact, 260)
+            best_fact = evidence_observation_text(supporting[0], 260)
             claim_text = (
                 f"作为单论文观察，{paper} 在{cluster.dimension_label}维度显示："
                 f"{best_fact}"
@@ -2639,7 +2639,7 @@ def cluster_summary(items: list[Evidence]) -> str:
     if not items:
         return ""
     papers = unique_strings([paper_key(ev) for ev in items])[:3]
-    facts = "；".join(compact_fact(ev.fact, 120) for ev in items[:3])
+    facts = "；".join(evidence_observation_text(ev, 120) for ev in items[:3])
     return f"覆盖 {len(items)} 条 Evidence、{len(papers)} 篇代表论文（{'; '.join(papers)}）：{facts}"
 
 
@@ -2648,10 +2648,20 @@ def cluster_paper_facts(items: list[Evidence]) -> str:
     for item in items:
         by_paper[paper_key(item)].append(item)
     parts: list[str] = []
-    for paper, paper_items in list(by_paper.items())[:4]:
+    for paper, paper_items in list(by_paper.items())[:3]:
         best = sorted(paper_items, key=lambda ev: ev.confidence, reverse=True)[0]
-        parts.append(f"{paper}：{compact_fact(best.fact, 120)}")
+        parts.append(f"{compact_paper_label(paper)}：{evidence_observation_text(best, 80)}")
     return "；".join(parts)
+
+
+def evidence_observation_text(evidence: Evidence, max_len: int = 120) -> str:
+    text = evidence.quote or evidence.content or evidence.fact
+    return compact_fact(text, max_len)
+
+
+def compact_paper_label(text: str, max_len: int = 82) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned if len(cleaned) <= max_len else cleaned[: max_len - 3] + "..."
 
 
 def most_common_nonempty(values: list[str]) -> str:
