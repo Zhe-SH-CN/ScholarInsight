@@ -7,10 +7,10 @@ import asyncio
 import json
 import re
 from collections import Counter, defaultdict
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Awaitable
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -587,11 +587,15 @@ class ResearchPipeline:
             # ── Report Composer ──
             async with self.node(run_id, status, "ReportComposerAgent",
                                  "生成本地 Markdown/JSON/CSV 交付文件"):
-                await self.write_report(
+                report_fallbacks = await self.write_report(
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"],
                     artifacts["observability"],
                 )
+                if report_fallbacks:
+                    status.warnings.append(
+                        f"ReportComposerAgent used deterministic fallback for {len(report_fallbacks)} section(s)."
+                    )
 
             status.status = "completed"
             status.current_stage = "Completed"
@@ -885,10 +889,14 @@ class ResearchPipeline:
                 await self.runs.save_status(status)
 
             async with self.node(run_id, status, "ReportComposerAgent", "生成本地 Markdown/JSON/CSV 交付文件"):
-                await self.write_report(
+                report_fallbacks = await self.write_report(
                     run_id, request, all_evidence, reviewed_claims, metrics,
                     artifacts["matrix"], artifacts["recommendations"], artifacts["observability"],
                 )
+                if report_fallbacks:
+                    status.warnings.append(
+                        f"ReportComposerAgent used deterministic fallback for {len(report_fallbacks)} section(s)."
+                    )
 
             status.status = "completed"
             status.current_stage = "Completed"
@@ -1383,40 +1391,84 @@ class ResearchPipeline:
         matrix: PaperPatternMatrix,
         recommendations: list[OpportunityRecommendation],
         observability: ObservabilitySnapshot,
-    ) -> None:
+    ) -> list[dict[str, str]]:
         composer = ReportComposerAgent(self.agent_context(run_id))
-        report = await composer.write(
-            request,
-            evidence,
-            claims,
-            metrics,
-            {
-                "matrix": matrix,
-                "recommendations": recommendations,
-                "observability": observability,
-            },
+        fallbacks: list[dict[str, str]] = []
+
+        async def run_section(
+            section: str,
+            label: str,
+            value: Awaitable[str],
+            fallback: str,
+        ) -> str:
+            try:
+                return await self._run_report_step(run_id, section, label, value)
+            except Exception as exc:
+                reason = {
+                    "section": section,
+                    "error_type": exc.__class__.__name__,
+                    "error": str(exc)[:500],
+                }
+                fallbacks.append(reason)
+                await self.trace(
+                    run_id,
+                    "ReportComposerAgent",
+                    "progress",
+                    "report_step_fallback",
+                    f"{label} 生成失败，已使用确定性 fallback",
+                    reason,
+                )
+                return fallback
+
+        report = await run_section(
+            "report",
+            "完整报告",
+            composer.write(
+                request,
+                evidence,
+                claims,
+                metrics,
+                {
+                    "matrix": matrix,
+                    "recommendations": recommendations,
+                    "observability": observability,
+                },
+            ),
+            build_analysis_report(request, evidence, claims, metrics, matrix, recommendations, observability),
         )
-        executive_summary = await composer.write_executive_summary(
-            request,
-            evidence,
-            claims,
-            metrics,
-            matrix,
-            recommendations,
-            observability,
+        executive_summary = await run_section(
+            "executive_summary",
+            "执行摘要",
+            composer.write_executive_summary(
+                request,
+                evidence,
+                claims,
+                metrics,
+                matrix,
+                recommendations,
+                observability,
+            ),
+            build_executive_summary(request, metrics, observability, recommendations),
         )
-        methodology = await composer.write_methodology(
-            request,
-            evidence,
-            claims,
-            metrics,
-            matrix,
-            observability,
+        methodology = await run_section(
+            "methodology",
+            "方法说明",
+            composer.write_methodology(
+                request,
+                evidence,
+                claims,
+                metrics,
+                matrix,
+                observability,
+            ),
+            build_methodology(request, observability),
         )
         run_dir = self.runs.run_dir(run_id)
         await write_text(run_dir / "reports" / "report.md", report)
         await write_text(run_dir / "reports" / "executive_summary.md", executive_summary)
         await write_text(run_dir / "reports" / "methodology.md", methodology)
+        if fallbacks:
+            await atomic_write_json(run_dir / "reports" / "report_fallbacks.json", fallbacks)
         await atomic_write_json(
             run_dir / "reports" / "report.json",
             {
@@ -1434,6 +1486,100 @@ class ResearchPipeline:
             run_dir / "exports" / "evidence_matrix.csv",
             build_evidence_csv(evidence, {ev.evidence_id: ev for ev in evidence}),
         )
+        await self.trace(
+            run_id,
+            "ReportComposerAgent",
+            "progress",
+            "reports_written",
+            "报告文件已写入 reports/ 和 exports/",
+            {
+                "fallback_sections": [item["section"] for item in fallbacks],
+                "files": [
+                    "reports/report.md",
+                    "reports/executive_summary.md",
+                    "reports/methodology.md",
+                    "reports/report.json",
+                    "exports/evidence_matrix.csv",
+                ],
+            },
+        )
+        return fallbacks
+
+    def _report_step_timeout_seconds(self) -> float:
+        return float(max(60, min(600, self.settings.cg_llm_timeout_seconds + 60)))
+
+    async def _run_report_step(
+        self,
+        run_id: str,
+        section: str,
+        label: str,
+        value: Awaitable[str],
+    ) -> str:
+        timeout_seconds = self._report_step_timeout_seconds()
+        await self.trace(
+            run_id,
+            "ReportComposerAgent",
+            "progress",
+            "report_step_started",
+            f"开始生成{label}",
+            {"section": section, "timeout_seconds": timeout_seconds},
+        )
+
+        async def heartbeat() -> None:
+            elapsed = 0
+            while True:
+                await asyncio.sleep(60)
+                elapsed += 60
+                await self.trace(
+                    run_id,
+                    "ReportComposerAgent",
+                    "progress",
+                    "report_step_heartbeat",
+                    f"{label}生成中：已等待 {elapsed}s",
+                    {
+                        "section": section,
+                        "elapsed_seconds": elapsed,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                )
+
+        heartbeat_task = asyncio.create_task(heartbeat())
+        try:
+            result = await asyncio.wait_for(value, timeout=timeout_seconds)
+        except asyncio.TimeoutError as exc:
+            await self.trace(
+                run_id,
+                "ReportComposerAgent",
+                "error",
+                "report_step_timeout",
+                f"{label}生成超过 {timeout_seconds:.0f}s",
+                {"section": section, "timeout_seconds": timeout_seconds},
+            )
+            raise TimeoutError(f"{section} generation exceeded {timeout_seconds:.0f}s") from exc
+        except Exception as exc:
+            await self.trace(
+                run_id,
+                "ReportComposerAgent",
+                "error",
+                "report_step_failed",
+                f"{label}生成失败",
+                {"section": section, "error_type": exc.__class__.__name__, "error": str(exc)[:500]},
+            )
+            raise
+        finally:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+
+        await self.trace(
+            run_id,
+            "ReportComposerAgent",
+            "progress",
+            "report_step_completed",
+            f"{label}生成完成",
+            {"section": section, "characters": len(result or "")},
+        )
+        return result
 
     @asynccontextmanager
     async def node(
