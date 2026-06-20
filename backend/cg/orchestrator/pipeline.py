@@ -3368,7 +3368,7 @@ def build_recommendations(
                 next_steps=[
                     f"围绕 {DIMENSION_LABELS.get(lead_claim.dimension, lead_claim.dimension)} 写出一个可检验 research question",
                     "把支持这一综合判断的论文按 source role 分组，分别设计实验协议、数据需求和失败判据",
-                    "优先补充反例或边界论文，确认该机会不是检索样本造成的局部现象",
+                    "预注册消融、反例集和负结果记录规则，确认该机会不是检索样本造成的局部现象",
                 ],
                 risks=[
                     "该机会来自本地论文证据综合，不等于已经验证的新方法贡献。",
@@ -3485,11 +3485,11 @@ def grounded_opportunity_text(request: ResearchRequest, claim: Claim) -> str:
     if claim.claim_type == "cross_role_contrast":
         return (
             f"围绕 {request.target_topic} 的{dimension}，把“{axis}”中的 source-role 分工设为机制变量；"
-            f"{submission_evaluation_plan(claim)}"
+            f"{submission_evaluation_plan(claim)} {submission_counterevidence_plan(claim)}"
         )
     return (
         f"围绕 {request.target_topic} 的{dimension}，把“{axis}”设为可控实验变量；"
-        f"{submission_evaluation_plan(claim)}"
+        f"{submission_evaluation_plan(claim)} {submission_counterevidence_plan(claim)}"
     )
 
 
@@ -4460,9 +4460,9 @@ def build_evidence_backed_opportunity_table(
         axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
         role_text = role_backing_phrase(claim) or "source role 尚未分组"
         if claim.claim_type == "cross_role_contrast":
-            next_step = "固定任务输入、指标和失败判据，加入/移除各 source role 对应机制。"
+            next_step = "固定任务输入、指标和失败判据，做 source-role add/remove 消融，并记录负结果与不迁移反例。"
         else:
-            next_step = "设计 baseline、机制增强、消融和反例集。"
+            next_step = "设计 baseline、机制增强、机制消融、hard-negative 反例集和负结果记录。"
         rows.append(
             "|"
             + "|".join(
@@ -4587,7 +4587,8 @@ def build_submission_framing(
                 f"- **问题定义**：{submission_problem_statement(request, claim)}{citations}",
                 f"- **方法假设**：{submission_method_hypothesis(request, claim)}",
                 f"- **实验化验证**：{submission_evaluation_plan(claim)}",
-                "- **边界条件**：该命题只继承 report-ready evidence 的范围；正式写作前必须补充反例论文、消融实验和人工原文复核。",
+                f"- **反例与负结果协议**：{submission_counterevidence_plan(claim)}",
+                "- **边界条件**：该命题只继承 report-ready evidence 的范围；正式写作前必须人工复核原文，并把消融失败、反例命中和负结果写入正文或附录。",
                 "",
             ]
         )
@@ -4640,11 +4641,28 @@ def submission_evaluation_plan(claim: Claim) -> str:
     if claim.claim_type == "cross_role_contrast":
         return (
             f"以“{axis}”为主轴，固定任务输入、指标和失败判据，分别加入/移除各 source role 对应的机制，"
-            "报告跨角色互补性、冲突点和负例。"
+            "报告跨角色互补性、冲突点、消融退化幅度和负例。"
         )
     return (
         f"以“{axis}”为主轴，设计同一任务下的 baseline、机制增强、消融和反例集，"
-        "只在独立论文证据与实验结果一致时写成贡献。"
+        "并预留负结果记录；只在独立论文证据与实验结果一致时写成贡献。"
+    )
+
+
+def submission_counterevidence_plan(claim: Claim) -> str:
+    axis = (
+        cluster_axis_phrase(claim.evidence_cluster_label)
+        if claim.evidence_cluster_label
+        else DIMENSION_LABELS.get(claim.dimension, claim.dimension_label)
+    )
+    if claim.claim_type == "cross_role_contrast":
+        return (
+            "反例集至少覆盖单一 source role 已足够、source-role 交互失败、跨任务不迁移三类边界；"
+            "每个 add/remove 消融都必须报告无收益、性能下降或错误类型不变的负结果。"
+        )
+    return (
+        f"反例集至少覆盖去掉“{axis}”机制后表现不变、相邻任务不成立、噪声或分布外样本失效三类边界；"
+        "机制消融若不能改变错误类型或指标，应作为负结果保留，而不是包装成贡献。"
     )
 
 
@@ -4689,7 +4707,8 @@ def build_grounded_hypotheses(
                 "",
                 f"- **研究假设**：{hypothesis}{citations}",
                 f"- **证据背书**：{grounded_backing_text(claim)}",
-                "- **边界条件**：该假设只由当前 report-ready evidence 支撑；正式写作前需要补充反例、消融设置和人工原文复核。",
+                f"- **反例与负结果**：{submission_counterevidence_plan(claim)}",
+                "- **边界条件**：该假设只由当前 report-ready evidence 支撑；正式写作前需要人工原文复核，并明确哪些消融或反例会推翻该假设。",
                 "",
             ]
         )

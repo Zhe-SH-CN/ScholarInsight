@@ -351,9 +351,13 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "**问题定义**：在 Counterfactual Inference 的核心反事实推断 中" in report
     assert "**方法假设**：把“核心反事实推断”显式建模为 Counterfactual Inference 的可控实验变量" in report
     assert "**实验化验证**：以“核心反事实推断”为主轴" in report
+    assert "**反例与负结果协议**" in report
+    assert "机制消融若不能改变错误类型或指标，应作为负结果保留" in report
+    assert "hard-negative 反例集和负结果记录" in report
     assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
     assert "### H1. 核心反事实推断中的证据轴实验问题" in report
     assert "把“核心反事实推断”定义为可控实验变量" in report
+    assert "**反例与负结果**" in report
     assert "多论文共识转化为可复现实验协议" not in report
     assert "现有多论文共识是否能跨任务" not in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
@@ -465,6 +469,9 @@ def test_submission_framing_keeps_cross_role_contrast_as_research_problem() -> N
     assert "formal math proving 2 篇；mathematical reasoning benchmark 2 篇" in framing
     assert "构造一个覆盖形式证明与符号推理的统一 benchmark" in framing
     assert "分别加入/移除各 source role 对应的机制" in framing
+    assert "source-role 交互失败" in framing
+    assert "跨任务不迁移" in framing
+    assert "无收益、性能下降或错误类型不变的负结果" in framing
 
 
 def test_analysis_report_does_not_promote_audit_only_representative_evidence() -> None:
@@ -649,9 +656,11 @@ def test_recommendations_use_grounded_opportunity_when_coverage_is_full() -> Non
     assert len(recommendations) == 1
     assert recommendations[0].title == "核心反事实推断中的证据轴实验问题"
     assert "可控实验变量" in recommendations[0].recommendation
+    assert "机制消融若不能改变错误类型或指标，应作为负结果保留" in recommendations[0].recommendation
     assert "多论文共识" not in recommendations[0].title
     assert "综述性观察" not in recommendations[0].recommendation
     assert recommendations[0].rationale.startswith("这一综合判断由 4 篇独立论文")
+    assert any("预注册消融、反例集和负结果记录规则" in step for step in recommendations[0].next_steps)
 
 
 def test_report_matrix_prioritizes_report_ready_supporting_papers() -> None:
