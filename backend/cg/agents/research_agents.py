@@ -88,6 +88,47 @@ AGENT_ALIASES = {
     "FinalQAAgent": "ReportComposerAgent",
 }
 
+SUPPLEMENTAL_APPLICATION_REJECTION_REASON = (
+    "supplemental RAG+KG gap search excludes application-case papers for generic topics"
+)
+
+APPLICATION_TOPIC_MARKERS = (
+    "application",
+    "recommendation",
+    "recommender",
+    "medical",
+    "clinical",
+    "healthcare",
+    "pathology",
+    "radiology",
+    "biomedical",
+    "robot",
+    "robotic",
+    "planning",
+    "low-resource",
+    "low resource",
+    "low-resourced",
+    "multilingual",
+)
+
+
+def target_topic_allows_application_sources(target_topic: str) -> bool:
+    topic = target_topic.lower()
+    return any(marker in topic for marker in APPLICATION_TOPIC_MARKERS)
+
+
+def should_reject_supplemental_application_source(
+    candidate: SourceCandidate,
+    *,
+    target_topic: str,
+    loop_round: int,
+) -> bool:
+    return (
+        loop_round > 1
+        and candidate.source_subtype == "application_case"
+        and not target_topic_allows_application_sources(target_topic)
+    )
+
 
 class ResearchPlanningAgent(BaseAgent):
     name = "ResearchPlanningAgent"
@@ -873,6 +914,15 @@ class SourceResearchAgent(BaseAgent):
                         min(1.0, max(result.score, result.relevance_score * 0.85 + task_score * 0.15)),
                         4,
                     )
+                if should_reject_supplemental_application_source(
+                    result,
+                    target_topic=target_topic,
+                    loop_round=loop_round,
+                ):
+                    result.relevance_label = "reject"
+                    result.relevance_score = 0.0
+                    result.score = 0.0
+                    result.rejection_reason = SUPPLEMENTAL_APPLICATION_REJECTION_REASON
                 if result.relevance_label == "reject":
                     rejected_results.append(result)
                     continue
@@ -897,6 +947,8 @@ class SourceResearchAgent(BaseAgent):
                             "relevance_score": item.relevance_score,
                             "relevance_label": item.relevance_label,
                             "rejection_reason": item.rejection_reason,
+                            "source_subtype": item.source_subtype,
+                            "source_subtype_reason": item.source_subtype_reason,
                         }
                         for item in provider_results
                     ],
@@ -921,6 +973,8 @@ class SourceResearchAgent(BaseAgent):
                         "relevance_score": item.relevance_score,
                         "relevance_label": item.relevance_label,
                         "rejection_reason": item.rejection_reason,
+                        "source_subtype": item.source_subtype,
+                        "source_subtype_reason": item.source_subtype_reason,
                     },
                 )
             await self.record_llm_event(
@@ -937,6 +991,8 @@ class SourceResearchAgent(BaseAgent):
                             "url": item.url,
                             "relevance_score": item.relevance_score,
                             "reason": item.rejection_reason,
+                            "source_subtype": item.source_subtype,
+                            "source_subtype_reason": item.source_subtype_reason,
                         }
                         for item in rejected_results[:8]
                     ],

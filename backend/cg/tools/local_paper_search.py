@@ -81,6 +81,13 @@ class RerankedScore:
     rejection_reason: str
 
 
+@dataclass(frozen=True)
+class SourceSubtype:
+    label: str
+    reason: str
+    rejection_reason: str = ""
+
+
 def normalize_term(term: str) -> str:
     """Normalize query/paper terms enough for lexical reranking."""
     term = term.lower().strip("-_")
@@ -565,6 +572,7 @@ class LocalPaperIndex:
                     papers[idx],
                     query,
                     combined_value,
+                    target_topic=target_topic,
                     embedding_score=embedding_score,
                     lexical_score=lexical_score,
                     reranker_score=relevance["reranker_score"],
@@ -788,9 +796,174 @@ class LocalPaperIndex:
                 return "RAG+KG query requires title-level RAG and graph signal"
             if not primary_has_kg:
                 return "RAG+KG query requires title/abstract knowledge graph signal"
+            subtype = self._source_subtype_for_topic(query, paper, target_topic=target_topic)
+            if subtype.rejection_reason:
+                return subtype.rejection_reason
             if not primary_has_rag:
                 return "RAG+KG query requires title/abstract retrieval-augmented generation signal"
         return ""
+
+    def _source_subtype_for_topic(
+        self,
+        query: str,
+        paper: dict,
+        *,
+        target_topic: str | None = None,
+    ) -> SourceSubtype:
+        gate_query = self._query_with_topic(query, target_topic)
+        terms = set(query_terms(gate_query))
+        query_needs_kg = {"knowledge", "graph"}.issubset(terms) or "kg" in terms or "graph_rag" in terms
+        query_needs_rag = (
+            "rag" in terms
+            or "graph_rag" in terms
+            or {"retrieval", "augmented", "generation"}.issubset(terms)
+        )
+        if not (query_needs_kg and query_needs_rag):
+            return SourceSubtype("unclassified", "")
+
+        title = canonical_paper_title(paper)
+        title_lower = title.lower()
+        abstract_lower = str(paper.get("abstract") or "").lower()
+        primary = f"{title_lower}\n{abstract_lower}"
+        primary_compact = re.sub(r"\s+", " ", primary)
+        title_compact = re.sub(r"\s+", " ", title_lower)
+        strong_core_markers = (
+            "graphrag",
+            "graph-rag",
+            "graph rag",
+            "kg-rag",
+            "kg rag",
+            "knowledge graph enhanced rag",
+            "knowledge graph-enhanced rag",
+            "knowledge-graph enhanced rag",
+            "knowledge-graph-enhanced rag",
+            "knowledge graph based retrieval-augmented generation",
+            "knowledge-graph based retrieval-augmented generation",
+            "knowledge graph-based retrieval-augmented generation",
+            "knowledge graph retrieval-augmented generation",
+            "graph retrieval-augmented generation",
+            "graph retrieval augmented generation",
+            "retrieval-augmented generation based on knowledge graph",
+            "retrieval-augmented generation based on knowledge graphs",
+            "retrieval augmented generation based on knowledge graph",
+            "retrieval augmented generation based on knowledge graphs",
+            "retrieval-augmented generation on knowledge graph",
+            "retrieval-augmented generation on knowledge graphs",
+            "retrieval augmented generation on knowledge graph",
+            "retrieval augmented generation on knowledge graphs",
+            "retrieval-augmented generation with knowledge graph",
+            "retrieval-augmented generation with knowledge graphs",
+            "retrieval augmented generation with knowledge graph",
+            "retrieval augmented generation with knowledge graphs",
+        )
+        title_graph_signal = (
+            "knowledge-graph" in title_compact
+            or "knowledge graph" in title_compact
+            or "graphrag" in title_compact
+            or "graph retrieval-augmented" in title_compact
+            or "graph retrieval augmented" in title_compact
+        )
+        title_has_rag_acronym = "rag" in title_compact
+        has_strong_core_marker = (
+            any(marker in primary_compact for marker in strong_core_markers)
+            or (title_has_rag_acronym and title_graph_signal)
+        )
+        title_has_strong_core_marker = (
+            any(marker in title_compact for marker in strong_core_markers)
+            or (title_has_rag_acronym and title_graph_signal)
+        )
+
+        kg_construction_markers = (
+            "knowledge graph construction",
+            "knowledge graph extraction",
+            "knowledge graph synthesis",
+            "knowledge graph generation",
+            "knowledge graphs from plain text",
+            "extracting knowledge graphs",
+            "constructing knowledge graphs",
+            "kg construction",
+            "kgc",
+            "mkgc",
+        )
+        title_has_kg_construction = any(
+            marker in title_compact for marker in kg_construction_markers
+        )
+        primary_has_kg_construction = any(
+            marker in primary_compact for marker in kg_construction_markers
+        )
+        if (
+            (title_has_kg_construction and not title_has_strong_core_marker)
+            or (primary_has_kg_construction and not has_strong_core_marker)
+        ):
+            return SourceSubtype(
+                "kg_construction",
+                "paper is primarily about constructing or extracting knowledge graphs, not KG-enhanced RAG",
+                "RAG+KG query excludes pure knowledge-graph construction/extraction papers",
+            )
+
+        kgqa_or_reasoning_markers = (
+            "knowledge graph question answering",
+            "graph question answering",
+            "kgqa",
+            "question answering",
+            "think-on-graph",
+            "think on graph",
+            "reasoning on knowledge graph",
+            "reasoning over knowledge graph",
+            "reasoning of large language model on knowledge graph",
+            "faithful reasoning",
+            "knowledge graph based prompting",
+            "knowledge graph-based prompting",
+            "knowledge graph prompting",
+            "chat with their graph",
+        )
+        if any(marker in primary_compact for marker in kgqa_or_reasoning_markers):
+            return SourceSubtype(
+                "kgqa_or_graph_reasoning",
+                "paper centers KGQA, graph reasoning, or KG prompting rather than a KG-RAG method",
+            )
+
+        application_markers = (
+            "recommendation",
+            "recommender",
+            "medical",
+            "clinical",
+            "healthcare",
+            "robot",
+            "robotic",
+            "planning",
+            "low-resourced",
+            "low resourced",
+            "multilingual",
+        )
+        if any(marker in primary_compact for marker in application_markers):
+            return SourceSubtype(
+                "application_case",
+                "paper studies KG-RAG in a specific application domain; use as supporting evidence",
+            )
+
+        benchmark_markers = (
+            "benchmark",
+            "dataset",
+            "comprehensive analysis",
+            "when to use graphs",
+        )
+        if any(marker in title_compact for marker in benchmark_markers):
+            return SourceSubtype(
+                "benchmark_or_analysis",
+                "paper primarily evaluates or analyzes KG-RAG behavior",
+            )
+
+        if has_strong_core_marker:
+            return SourceSubtype(
+                "core_kg_rag_method",
+                "title/abstract explicitly frames a KG/GraphRAG retrieval-augmented generation method",
+            )
+
+        return SourceSubtype(
+            "rag_kg_adjacent",
+            "paper has RAG and knowledge graph signals but lacks a strong KG-RAG method marker",
+        )
 
     def _pseudo_query_embedding(
         self,
@@ -836,7 +1009,7 @@ class LocalPaperIndex:
         results = []
         for score, paper in scored[:max_results]:
             if score > 0:
-                results.append(self._candidate_from_paper(paper, query, score))
+                results.append(self._candidate_from_paper(paper, query, score, target_topic=target_topic))
         return results
 
     def _query_with_topic(self, query: str, target_topic: str | None) -> str:
@@ -853,6 +1026,7 @@ class LocalPaperIndex:
         query: str,
         score: float,
         *,
+        target_topic: str | None = None,
         embedding_score: float | None = None,
         lexical_score: float | None = None,
         reranker_score: float | None = None,
@@ -861,6 +1035,7 @@ class LocalPaperIndex:
         rejection_reason: str = "",
     ) -> SourceCandidate:
         title = canonical_paper_title(paper)
+        subtype = self._source_subtype_for_topic(query, paper, target_topic=target_topic)
         return SourceCandidate(
             url=paper.get("pdf_path", ""),
             title=title,
@@ -875,6 +1050,8 @@ class LocalPaperIndex:
             relevance_score=relevance_score if relevance_score is not None else min(max(float(score), 0.0), 1.0),
             relevance_label=relevance_label,
             rejection_reason=rejection_reason,
+            source_subtype=subtype.label,
+            source_subtype_reason=subtype.reason,
             source_provider="local_papers",
         )
 

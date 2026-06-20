@@ -7,7 +7,11 @@ from typing import Any
 
 import pytest
 
-from cg.agents.research_agents import SourceResearchAgent
+from cg.agents.research_agents import (
+    SUPPLEMENTAL_APPLICATION_REJECTION_REASON,
+    SourceResearchAgent,
+    should_reject_supplemental_application_source,
+)
 from cg.agents.runtime import AgentContext
 from cg.llm import LLMClient
 from cg.schemas.research import ResearchPlan, ResearchRequest, SourceCandidate, SourceTask
@@ -140,6 +144,31 @@ async def test_discover_uses_second_pass_to_break_domain_concentration(tmp_path:
         "/papers/rag-2.pdf",
         "/papers/rag-3.pdf",
     }
+
+
+def test_supplemental_application_source_filter_only_for_generic_topics() -> None:
+    candidate = SourceCandidate(
+        url="/papers/medical-kg-rag.pdf",
+        title="Medical KG-RAG",
+        source_subtype="application_case",
+    )
+
+    assert should_reject_supplemental_application_source(
+        candidate,
+        target_topic="RAG with Knowledge Graphs",
+        loop_round=2,
+    )
+    assert not should_reject_supplemental_application_source(
+        candidate,
+        target_topic="Medical RAG with Knowledge Graphs",
+        loop_round=2,
+    )
+    assert not should_reject_supplemental_application_source(
+        candidate,
+        target_topic="RAG with Knowledge Graphs",
+        loop_round=1,
+    )
+    assert SUPPLEMENTAL_APPLICATION_REJECTION_REASON
 
 
 def make_agent(tmp_path: Path) -> SourceResearchAgent:

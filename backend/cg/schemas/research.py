@@ -130,6 +130,8 @@ class SourceCandidate(BaseModel):
     relevance_score: float = Field(default=0.5, ge=0, le=1)
     relevance_label: str = "unscored"
     rejection_reason: str = ""
+    source_subtype: str = "unclassified"
+    source_subtype_reason: str = ""
     source_provider: str = ""
     published_at: datetime | None = None
     date_source: str = "unknown"  # exa / tavily / zhihu_edit_time / unknown
@@ -195,6 +197,8 @@ class SourceDocument(BaseModel):
     relevance_score: float = Field(default=0.5, ge=0, le=1)
     relevance_label: str = "unscored"
     rejection_reason: str = ""
+    source_subtype: str = "unclassified"
+    source_subtype_reason: str = ""
     embedding_score: float | None = None
     lexical_score: float | None = None
     reranker_score: float | None = None

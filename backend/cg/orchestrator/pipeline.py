@@ -989,6 +989,8 @@ class ResearchPipeline:
             relevance_score=candidate.relevance_score,
             relevance_label=candidate.relevance_label,
             rejection_reason=candidate.rejection_reason,
+            source_subtype=candidate.source_subtype,
+            source_subtype_reason=candidate.source_subtype_reason,
             embedding_score=candidate.embedding_score,
             lexical_score=candidate.lexical_score,
             reranker_score=candidate.reranker_score,
@@ -1041,6 +1043,8 @@ class ResearchPipeline:
                 relevance_score=candidate.relevance_score,
                 relevance_label=candidate.relevance_label,
                 rejection_reason=candidate.rejection_reason,
+                source_subtype=candidate.source_subtype,
+                source_subtype_reason=candidate.source_subtype_reason,
                 embedding_score=candidate.embedding_score,
                 lexical_score=candidate.lexical_score,
                 reranker_score=candidate.reranker_score,
@@ -1129,6 +1133,8 @@ class ResearchPipeline:
                         "relevance_score": document.relevance_score,
                         "relevance_label": document.relevance_label,
                         "rejection_reason": document.rejection_reason or "below evidence extraction relevance threshold",
+                        "source_subtype": document.source_subtype,
+                        "source_subtype_reason": document.source_subtype_reason,
                     },
                 )
                 continue

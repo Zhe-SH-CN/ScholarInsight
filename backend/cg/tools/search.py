@@ -663,6 +663,10 @@ def merge_candidate(first: SourceCandidate, second: SourceCandidate) -> SourceCa
         relevance_score=max(primary.relevance_score, secondary.relevance_score),
         relevance_label=primary.relevance_label if primary.relevance_label != "unscored" else secondary.relevance_label,
         rejection_reason=primary.rejection_reason or secondary.rejection_reason,
+        source_subtype=primary.source_subtype
+        if primary.source_subtype != "unclassified"
+        else secondary.source_subtype,
+        source_subtype_reason=primary.source_subtype_reason or secondary.source_subtype_reason,
         source_provider=provider,
     )
 

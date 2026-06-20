@@ -102,6 +102,10 @@ def test_rag_kg_gate_still_rejects_kg_construction_without_title_rag_signal() ->
         "KGGen: Extracting Knowledge Graphs from Plain Text with Language Models"
     )
     assert (
+        _index()._source_subtype_for_topic("RAG with Knowledge Graphs", paper).label
+        == "kg_construction"
+    )
+    assert (
         _index()._topic_rejection_reason("RAG with Knowledge Graphs", paper)
         == "RAG+KG query requires title-level RAG and graph signal"
     )
@@ -207,3 +211,106 @@ def test_rag_kg_target_gate_accepts_frag_paper_under_drift_query() -> None:
         )
         == ""
     )
+
+
+def test_rag_kg_subtype_rejects_retrieval_augmented_kg_construction() -> None:
+    paper = {
+        "title": "mRAKL: Multilingual Retrieval-Augmented Knowledge Graph Construction for Low-Resourced Languages",
+        "abstract": (
+            "Multilingual Knowledge Graph Construction (mKGC) is the task of "
+            "constructing or predicting missing entities and links for knowledge graphs. "
+            "We reformulate mKGC with retrieval-augmented techniques."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/mrakl.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "RAG with Knowledge Graphs formal experimental evaluation",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert subtype.label == "kg_construction"
+    assert subtype.rejection_reason == (
+        "RAG+KG query excludes pure knowledge-graph construction/extraction papers"
+    )
+    assert _index()._topic_rejection_reason(
+        "RAG with Knowledge Graphs formal experimental evaluation",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    ) == subtype.rejection_reason
+
+
+def test_rag_kg_subtype_keeps_graphrag_with_local_kg_construction() -> None:
+    paper = {
+        "title": "Query-Driven Multimodal GraphRAG: Dynamic Local Knowledge Graph Construction for Online Reasoning",
+        "abstract": (
+            "Recent advances include retrieval-augmented generation and "
+            "knowledge graph-enhanced RAG. We propose a GraphRAG framework that "
+            "constructs a local knowledge graph for online reasoning."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/query_driven_multimodal_graphrag.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "RAG with Knowledge Graphs multimodal integration",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert subtype.label == "core_kg_rag_method"
+    assert subtype.rejection_reason == ""
+    assert _index()._topic_rejection_reason(
+        "RAG with Knowledge Graphs multimodal integration",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    ) == ""
+
+
+def test_rag_kg_subtype_marks_application_without_rejecting() -> None:
+    paper = {
+        "title": "Knowledge Graph Retrieval-Augmented Generation for LLM-based Recommendation",
+        "abstract": (
+            "The recommender system uses knowledge graph retrieval-augmented "
+            "generation to improve LLM-based recommendation quality."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/kg_rag_recommendation.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "RAG with Knowledge Graphs limitations",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert subtype.label == "application_case"
+    assert subtype.rejection_reason == ""
+    assert _index()._topic_rejection_reason(
+        "RAG with Knowledge Graphs limitations",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    ) == ""
+
+
+def test_rag_kg_subtype_separates_kgqa_graph_reasoning() -> None:
+    paper = {
+        "title": "Fast Think-on-Graph: Wider, Deeper and Faster Reasoning of Large Language Model on Knowledge Graph",
+        "abstract": (
+            "Graph Retrieval Augmented Generation can integrate knowledge graphs, "
+            "but this paper focuses on question answering and reasoning on knowledge graph paths."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/fast_tog.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "RAG with Knowledge Graphs hallucination mitigation",
+        paper,
+        target_topic="RAG with Knowledge Graphs",
+    )
+
+    assert subtype.label == "kgqa_or_graph_reasoning"
+    assert subtype.rejection_reason == ""
