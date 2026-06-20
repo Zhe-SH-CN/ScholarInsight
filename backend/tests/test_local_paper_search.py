@@ -528,6 +528,30 @@ def test_causal_reasoning_llm_gate_rejects_video_counterfactual_benchmark_drift(
     )
 
 
+def test_causal_reasoning_llm_gate_rejects_sensor_health_application_drift() -> None:
+    paper = {
+        "title": "ProMind-LLM: Proactive Mental Health Care via Causal Reasoning with Sensor Data",
+        "abstract": (
+            "Mental health risk is a public health challenge. The system uses "
+            "large language models, sensor data, and causal reasoning to support "
+            "proactive mental health care applications."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/promind_llm_sensor_health.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs causal explanation mechanism",
+        paper,
+        target_topic="Causal Reasoning with LLMs",
+    )
+
+    assert subtype.label == "causal_application_adjacent"
+    assert subtype.rejection_reason == (
+        "Causal reasoning with LLMs query excludes causal application papers unless they directly evaluate LLM causal/counterfactual reasoning"
+    )
+
+
 def test_causal_reasoning_llm_gate_rejects_uncertain_text_reasoning_drift() -> None:
     paper = {
         "title": "Reasoning over Uncertain Text by Generative Large Language Models",

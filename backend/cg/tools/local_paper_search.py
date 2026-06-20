@@ -1082,6 +1082,11 @@ class LocalPaperIndex:
                 "audio llms",
                 "reasoning process rewards",
                 "process rewards",
+                "mental health",
+                "health care",
+                "healthcare",
+                "sensor data",
+                "proactive care",
             )
         )
         modality_application_drift = any(
