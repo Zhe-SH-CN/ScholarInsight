@@ -4049,6 +4049,10 @@ def build_analysis_report(
         "",
         *build_evidence_backed_opportunity_table(request, claims, citation_numbers),
         "",
+        "## 形式化证据门控与数学背书",
+        "",
+        *build_formal_evidence_gate(claims, citation_numbers),
+        "",
         f"## {request.target_topic} 的研究进展与空白",
         "",
         "### 已具备的优势",
@@ -4458,6 +4462,79 @@ def build_evidence_backed_opportunity_table(
             + "|"
         )
     return rows
+
+
+def build_formal_evidence_gate(
+    claims: list[Claim],
+    citation_numbers: dict[str, int],
+    limit: int = 4,
+) -> list[str]:
+    ready_claims = sorted(
+        [claim for claim in claims if is_report_ready_claim(claim)],
+        key=lambda item: (
+            item.claim_type == "cross_role_contrast",
+            item.source_paper_count,
+            len(item.supporting_evidence_ids),
+            item.confidence,
+        ),
+        reverse=True,
+    )[:limit]
+    if not ready_claims:
+        return [
+            "当前尚无 report-ready synthesis，因此不生成形式化主体结论证书；应先补充独立论文、反例和可审计 evidence。"
+        ]
+
+    lines = [
+        "记一条候选综合结论为 c，E_c 为 supporting evidence 集合，P_c 为独立论文集合，"
+        "R_c 为 source role 集合。报告主体只接收满足以下充分条件的 c：",
+        "",
+        "`g(c)=1 iff verified(c) and risk(c)<high and |E_c|>=2 and |P_c|>=2 and support(c)=strong and R_c subset R_reportable`。",
+        "",
+        "若 c 是 cross-role contrast，还要求 `|P_c|>=4` 且每个 reportable role 至少由 2 篇独立论文支撑；"
+        "否则只能写成待验证观察或补证 backlog。",
+        "",
+        "| 综合结论范围 | 类型 | 证据证书 | 门控结论 | 引用 |",
+        "|---|---|---|---|---|",
+    ]
+    for claim in ready_claims:
+        axis = cluster_axis_phrase(claim.evidence_cluster_label) if claim.evidence_cluster_label else claim.dimension_label
+        certificate = formal_gate_certificate(claim)
+        citations = citations_for_ids(claim.supporting_evidence_ids, citation_numbers, limit=4)
+        lines.append(
+            "|"
+            + "|".join(
+                csv_safe_markdown(value)
+                for value in [
+                    compact_fact(axis, 88),
+                    claim.claim_type,
+                    certificate,
+                    "g(c)=1，可进入主体；边界条件仍需在实验中复核",
+                    citations,
+                ]
+            )
+            + "|"
+        )
+    return lines
+
+
+def formal_gate_certificate(claim: Claim) -> str:
+    evidence_count = len(claim.supporting_evidence_ids)
+    role_paper_counts = getattr(claim, "supporting_source_subtype_paper_counts", {}) or {}
+    if claim.claim_type == "cross_role_contrast" and role_paper_counts:
+        min_role_papers = min(role_paper_counts.values())
+        role_bits = ", ".join(
+            f"{source_role_label(role)}:{count}"
+            for role, count in sorted(role_paper_counts.items())
+        )
+        return (
+            f"verified; |E_c|={evidence_count}; |P_c|={claim.source_paper_count}; "
+            f"min_r |P_c,r|={min_role_papers}; roles=({role_bits}); support={claim.evidence_support_level}"
+        )
+    role_text = role_backing_phrase(claim) or "source role 已记录"
+    return (
+        f"verified; |E_c|={evidence_count}; |P_c|={claim.source_paper_count}; "
+        f"roles={role_text}; support={claim.evidence_support_level}"
+    )
 
 
 def build_grounded_hypotheses(

@@ -333,6 +333,12 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
 
     assert "## 可检验研究假设与学术背书" in report
     assert "## 证据背书机会表" in report
+    assert "## 形式化证据门控与数学背书" in report
+    assert "g(c)=1 iff" in report
+    assert "R_c subset R_reportable" in report
+    assert "\\|E_c\\|=4" in report
+    assert "\\|P_c\\|=4" in report
+    assert "support=strong" in report
     assert "| 机会 | 证据轴 | 学术背书 | 下一步验证 |" in report
     assert "### H1. 将核心反事实推断中的多论文共识转化为可复现实验协议" in report
     assert "**证据背书**：这一综合判断由 4 篇独立论文" in report
@@ -342,6 +348,55 @@ def test_analysis_report_includes_grounded_hypotheses_and_backing() -> None:
     assert "本维度当前证据仅支撑待验证观察" not in report
     assert "该 claim" not in report
     assert "不是直接写成领域趋势" in report
+
+
+def test_formal_evidence_gate_records_cross_role_minimum_certificate() -> None:
+    claim = Claim(
+        claim_id="claim_cross_role_gate",
+        run_id="run_test",
+        dimension="lab_workflow_reasoning",
+        dimension_label="实验流程推理",
+        claim=(
+            "在实验流程推理维度，4 篇论文共同围绕 scientific discovery workflow protocol "
+            "形成来源角色分工对照。"
+        ),
+        supporting_evidence_ids=["ev_a", "ev_b", "ev_c", "ev_d"],
+        confidence=0.9,
+        risk_level="low",
+        reasoning_summary="Supported by two benchmark papers and two workflow papers.",
+        verification_status="verified",
+        claim_type="cross_role_contrast",
+        source_paper_count=4,
+        evidence_support_level="strong",
+        supporting_source_subtypes=[
+            "scientific_reasoning_benchmark",
+            "scientific_discovery_agent",
+        ],
+        supporting_source_subtype_counts={
+            "scientific_reasoning_benchmark": 2,
+            "scientific_discovery_agent": 2,
+        },
+        supporting_source_subtype_paper_counts={
+            "scientific_reasoning_benchmark": 2,
+            "scientific_discovery_agent": 2,
+        },
+        evidence_cluster_label="scientific discovery workflow protocol",
+    )
+
+    gate = "\n".join(
+        pipeline_module.build_formal_evidence_gate(
+            [claim],
+            {"ev_a": 1, "ev_b": 2, "ev_c": 3, "ev_d": 4},
+        )
+    )
+
+    assert "cross-role contrast" in gate
+    assert "\\|E_c\\|=4" in gate
+    assert "\\|P_c\\|=4" in gate
+    assert "min_r \\|P_c,r\\|=2" in gate
+    assert "scientific reasoning benchmark:2" in gate
+    assert "scientific discovery agent/workflow:2" in gate
+    assert "g(c)=1，可进入主体" in gate
 
 
 def test_analysis_report_does_not_promote_audit_only_representative_evidence() -> None:
