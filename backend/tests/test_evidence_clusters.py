@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from cg.orchestrator.pipeline import build_claims_from_clusters, build_evidence_clusters
+from cg.orchestrator.pipeline import apply_claim_discipline, build_claims_from_clusters, build_evidence_clusters
 from cg.schemas.research import Claim, Evidence
 
 
@@ -77,7 +77,45 @@ def test_cluster_claims_synthesize_only_same_source_role() -> None:
     claim = synthesis_claims[0]
     assert claim.source_paper_count == 2
     assert "KGQA/graph reasoning" in claim.claim
+    assert "提供了相近证据" not in claim.claim
     assert set(claim.supporting_evidence_ids) == {"ev_a1", "ev_b1"}
+
+
+def test_claim_discipline_backlogs_unsupported_source_roles() -> None:
+    evidence = [
+        _evidence(
+            "ev_a1",
+            "Paper A",
+            "probabilistic_modeling",
+            "Causal discovery estimates graph structure.",
+            source_subtype="causal_inference_adjacent",
+        ),
+        _evidence(
+            "ev_b1",
+            "Paper B",
+            "probabilistic_modeling",
+            "Interventional distributions are estimated.",
+            source_subtype="causal_inference_adjacent",
+        ),
+    ]
+    claim = Claim(
+        claim_id="claim_a",
+        run_id="run_test",
+        dimension="probabilistic_modeling",
+        dimension_label="probabilistic_modeling",
+        claim="Causal-adjacent papers show a shared probabilistic pattern.",
+        supporting_evidence_ids=["ev_a1", "ev_b1"],
+        confidence=0.8,
+        risk_level="low",
+        reasoning_summary="Supported by two papers.",
+        verification_status="verified",
+    )
+
+    reviewed = apply_claim_discipline([claim], evidence)
+
+    assert reviewed[0].verification_status == "needs_evidence"
+    assert reviewed[0].backlog_reason == "unsupported_source_role"
+    assert reviewed[0].risk_level == "medium"
 
 
 def test_evidence_clusters_track_verified_claims() -> None:

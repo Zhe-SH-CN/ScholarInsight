@@ -136,6 +136,12 @@ def query_phrases(terms: list[str]) -> list[str]:
     return phrases[:8]
 
 
+def compact_topic_text(text: str) -> str:
+    text = text.replace("\u00ad", "")
+    text = re.sub(r"([a-zA-Z])-\s+([a-zA-Z])", r"\1\2", text)
+    return re.sub(r"\s+", " ", text.lower()).strip()
+
+
 BAD_TITLE_PREFIXES = (
     "findings of the association",
     "proceedings of the",
@@ -997,10 +1003,11 @@ class LocalPaperIndex:
         return ""
 
     def _paper_primary_compact(self, paper: dict) -> tuple[str, str]:
-        title = canonical_paper_title(paper).lower()
-        abstract = str(paper.get("abstract") or "").lower()
-        primary = f"{title}\n{abstract}"
-        return re.sub(r"\s+", " ", title), re.sub(r"\s+", " ", primary)
+        title = canonical_paper_title(paper)
+        abstract = str(paper.get("abstract") or "")[:2400]
+        focused = str(paper.get("focused_text") or "")[:1800]
+        primary = f"{title}\n{abstract}\n{focused}"
+        return compact_topic_text(title), compact_topic_text(primary)
 
     def _causal_reasoning_llm_subtype(self, paper: dict) -> SourceSubtype:
         title, primary = self._paper_primary_compact(paper)
@@ -1080,10 +1087,103 @@ class LocalPaperIndex:
                 "structural causal model",
                 "structural causal models",
                 "unconfoundedness",
-                "causal discovery",
-                "causal mechanism",
             )
         )
+        title_terms = re.findall(r"[a-z]{3,}", title)
+        title_has_counterfactual_signal = any(
+            marker in title
+            for marker in (
+                "counterfactual",
+                "treatment effect",
+                "causal effect",
+                "potential outcome",
+                "structural causal",
+            )
+        )
+        has_application_drift = any(
+            marker in primary
+            for marker in (
+                "recommender",
+                "news recommendation",
+                "item recommendation",
+                "implicit feedback",
+                "collaborative filtering",
+                "user-item",
+                "user item",
+                "click-through",
+                "click through",
+                "popularity-aware",
+                "popularity aware",
+                "popularity bias",
+                "debiased modeling",
+            )
+        ) or "recommendation" in title
+        has_policy_eval_drift = any(
+            marker in primary
+            for marker in (
+                "off-policy",
+                "off policy",
+                "policy evaluation",
+                "policy mean embedding",
+                "policy mean embeddings",
+            )
+        )
+        has_vision_drift = any(
+            marker in primary
+            for marker in (
+                "vision transformer",
+                "vision transformers",
+                "image classification",
+                "long-tailed",
+                "long tailed",
+                "object detection",
+                "semantic segmentation",
+            )
+        )
+        has_causal_discovery_drift = any(
+            marker in primary
+            for marker in (
+                "causal discovery",
+                "causal structure",
+                "causal graph discovery",
+                "interventional distribution",
+                "interventional distributions",
+            )
+        )
+        if has_application_drift:
+            return SourceSubtype(
+                "application_or_recommender_adjacent",
+                "paper applies counterfactual or causal language to recommendation/debiasing rather than counterfactual inference methods",
+                "Counterfactual inference query excludes recommender/debiasing application papers",
+            )
+        if has_policy_eval_drift and not has_treatment and "counterfactual fairness" not in primary:
+            return SourceSubtype(
+                "policy_evaluation_adjacent",
+                "paper is primarily off-policy or policy-evaluation work rather than counterfactual inference",
+                "Counterfactual inference query excludes off-policy evaluation papers",
+            )
+        if has_vision_drift and not (has_counterfactual or has_treatment):
+            return SourceSubtype(
+                "vision_application_adjacent",
+                "paper is a vision-domain causal intervention application rather than counterfactual inference",
+                "Counterfactual inference query excludes generic vision causal-intervention papers",
+            )
+        if has_causal_discovery_drift and not (has_counterfactual or has_treatment):
+            return SourceSubtype(
+                "causal_discovery_adjacent",
+                "paper studies causal discovery or interventional distributions without explicit counterfactual/treatment-effect inference",
+                "Counterfactual inference query excludes causal-discovery-only papers",
+            )
+        if (
+            len(title_terms) <= 2
+            and not title_has_counterfactual_signal
+            and not (has_counterfactual or has_treatment or has_causal_inference)
+        ):
+            return SourceSubtype(
+                "probabilistic_or_ml_adjacent",
+                "paper title metadata is too weak for topic-specific counterfactual screening",
+                "non-informative paper title metadata",
+            )
         if not (has_counterfactual or has_treatment or has_causal_inference):
             return SourceSubtype(
                 "probabilistic_or_ml_adjacent",

@@ -390,6 +390,96 @@ def test_counterfactual_inference_gate_classifies_treatment_effect() -> None:
     assert _index()._topic_rejection_reason("Counterfactual Inference representation learning", paper) == ""
 
 
+def test_counterfactual_inference_gate_handles_hyphenated_counterfactual() -> None:
+    paper = {
+        "title": "Targeted Estimation of Potential Outcomes",
+        "abstract": (
+            "The method estimates counter-\n"
+            "factual outcomes and heterogeneous treatment effects from observational data."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/targeted_counterfactual_estimation.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Counterfactual Inference potential outcomes",
+        paper,
+    )
+
+    assert subtype.label == "treatment_effect_estimation"
+    assert _index()._topic_rejection_reason("Counterfactual Inference potential outcomes", paper) == ""
+
+
+def test_counterfactual_inference_gate_rejects_recommender_drift() -> None:
+    paper = {
+        "title": "Counterfactual Implicit Feedback Modeling",
+        "abstract": (
+            "This recommender system paper models implicit feedback and popularity "
+            "bias for recommendation debiasing."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/counterfactual_implicit_feedback.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Counterfactual Inference cross-domain synthesis",
+        paper,
+    )
+
+    assert subtype.label == "application_or_recommender_adjacent"
+    assert subtype.rejection_reason == (
+        "Counterfactual inference query excludes recommender/debiasing application papers"
+    )
+    assert _index()._topic_rejection_reason(
+        "Counterfactual Inference cross-domain synthesis",
+        paper,
+    ) == subtype.rejection_reason
+
+
+def test_counterfactual_inference_gate_rejects_off_policy_eval_drift() -> None:
+    paper = {
+        "title": "Off-policy Estimation with Adaptively Collected Data",
+        "abstract": (
+            "The work studies off-policy evaluation and policy mean embeddings "
+            "for online learning."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/off_policy_estimation.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Counterfactual Inference policy evaluation",
+        paper,
+    )
+
+    assert subtype.label == "policy_evaluation_adjacent"
+    assert subtype.rejection_reason == (
+        "Counterfactual inference query excludes off-policy evaluation papers"
+    )
+
+
+def test_counterfactual_inference_gate_rejects_causal_discovery_only() -> None:
+    paper = {
+        "title": "A Meta-Learning Approach to Bayesian Causal Discovery",
+        "abstract": (
+            "The paper estimates causal structure and interventional distributions "
+            "for graph structure learning under interventions."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/bayesian_causal_discovery.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Counterfactual Inference probabilistic modeling",
+        paper,
+    )
+
+    assert subtype.label == "causal_discovery_adjacent"
+    assert subtype.rejection_reason == (
+        "Counterfactual inference query excludes causal-discovery-only papers"
+    )
+
+
 def test_multi_hop_graph_gate_rejects_generic_gnn_representation() -> None:
     paper = {
         "title": "GPEN: Global Position Encoding Network for Enhanced Subgraph Representation Learning",

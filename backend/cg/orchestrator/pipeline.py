@@ -1733,7 +1733,6 @@ SYNTHESIS_SOURCE_ROLES = {
     "core_counterfactual_inference",
     "treatment_effect_estimation",
     "counterfactual_explanation_or_fairness",
-    "causal_inference_adjacent",
     "core_multi_hop_graph_reasoning",
     "kgqa_or_graph_reasoning",
     "graph_reasoning_benchmark",
@@ -1848,10 +1847,10 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
     for cluster in candidate_clusters:
         for supporting in select_atomic_observation_supports(cluster, by_id):
             paper = paper_key(supporting[0])
-            paper_facts = cluster_paper_facts(supporting)
+            best_fact = compact_fact(supporting[0].fact, 260)
             claim_text = (
-                f"作为单论文观察，{paper} 在{cluster.dimension_label}维度呈现"
-                f"'{cluster.label}' 证据：{paper_facts}"
+                f"作为单论文观察，{paper} 在{cluster.dimension_label}维度显示："
+                f"{best_fact}"
             )
             reasoning = (
                 f"该 observation 只绑定 {paper} 的 {len(supporting)} 条 Evidence，"
@@ -1886,8 +1885,8 @@ def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evi
         paper_facts = cluster_paper_facts(supporting)
         source_role_label = SOURCE_ROLE_LABELS.get(source_role, source_role.replace("_", " "))
         claim_text = (
-            f"在{cluster.dimension_label}维度，至少 {paper_count} 篇 {source_role_label} 论文"
-            f"在'{cluster.label}' 上提供了相近证据：{paper_facts}"
+            f"{source_role_label} 方向在{cluster.dimension_label}维度形成一个共同模式："
+            f"{paper_facts}"
         )
         reasoning = (
             f"该 synthesis 只合并同一 source role（{source_role_label}）内的证据，"
@@ -2094,6 +2093,8 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
     for claim in claims:
         supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
         paper_count = len({paper_key(ev) for ev in supporting})
+        source_roles = {ev.source_subtype for ev in supporting if ev.source_subtype}
+        reportable_roles = {role for role in source_roles if role in SYNTHESIS_SOURCE_ROLES}
         claim.source_paper_count = paper_count
         claim.evidence_support_level = evidence_support_level(len(supporting), paper_count)
         if paper_count >= 2:
@@ -2108,6 +2109,10 @@ def apply_claim_discipline(claims: list[Claim], evidence: list[Evidence]) -> lis
             backlog_reason = "single_evidence_claim"
         elif claim.claim_type == "comparative" and paper_count < 2:
             backlog_reason = "comparative_claim_without_independent_papers"
+        elif source_roles and not source_roles.issubset(SYNTHESIS_SOURCE_ROLES):
+            backlog_reason = "unsupported_source_role"
+        elif claim.claim_type == "comparative" and len(reportable_roles) != 1:
+            backlog_reason = "mixed_source_roles"
         elif claim.verification_status in {"needs_evidence", "challenged", "rejected"}:
             backlog_reason = f"red_team_{claim.verification_status}"
 
