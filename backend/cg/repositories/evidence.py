@@ -58,4 +58,6 @@ class EvidenceRepository:
             reasoning_pattern=evidence.reasoning_pattern,
             bottleneck=evidence.bottleneck,
             mechanism=evidence.mechanism,
+            source_subtype=evidence.source_subtype,
+            source_subtype_reason=evidence.source_subtype_reason,
         )

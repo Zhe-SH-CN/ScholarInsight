@@ -11,6 +11,7 @@ from uuid import uuid4
 from cg.repositories.base import atomic_write_json, read_json, read_jsonl, read_text
 from cg.schemas.research import (
     Claim,
+    EvidenceCluster,
     PaperPatternMatrix,
     EvidenceGraph,
     EvidenceSummary,
@@ -216,6 +217,7 @@ class RunRepository:
         recommendations_data = await read_json(run_dir / "exports" / "recommendations.json", [])
         observability_data = await read_json(run_dir / "exports" / "observability.json")
         graph_data = await read_json(run_dir / "exports" / "evidence_graph.json")
+        clusters_data = await read_json(run_dir / "exports" / "evidence_clusters.json", [])
         evidence_summaries: list[EvidenceSummary] = []
         for row in evidence_rows:
             full_evidence = await read_json(run_dir / "evidence" / f"{row.get('evidence_id')}.json")
@@ -237,6 +239,7 @@ class RunRepository:
             recommendations=[OpportunityRecommendation(**row) for row in recommendations_data],
             observability=ObservabilitySnapshot(**observability_data) if observability_data else None,
             evidence_graph=EvidenceGraph(**graph_data) if graph_data else None,
+            evidence_clusters=[EvidenceCluster(**row) for row in clusters_data],
             report_markdown=report,
             executive_summary_markdown=executive_summary,
             methodology_markdown=methodology,

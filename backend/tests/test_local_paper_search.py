@@ -314,3 +314,114 @@ def test_rag_kg_subtype_separates_kgqa_graph_reasoning() -> None:
 
     assert subtype.label == "kgqa_or_graph_reasoning"
     assert subtype.rejection_reason == ""
+
+
+def test_causal_reasoning_llm_gate_rejects_autoregressive_causal_inference() -> None:
+    paper = {
+        "title": "KV-Runahead: Scalable Causal LLM Inference by Parallel Key-Value Cache Generation",
+        "abstract": (
+            "The paper accelerates autoregressive causal language model inference "
+            "with cache generation for efficient decoding."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/kv_runahead.pdf",
+    }
+
+    assert _index()._topic_rejection_reason(
+        "Causal Reasoning with LLMs inference-time control",
+        paper,
+    ) == "Causal reasoning with LLMs query requires causal/counterfactual reasoning and LLM signal"
+
+
+def test_causal_reasoning_llm_gate_accepts_core_benchmark() -> None:
+    paper = {
+        "title": "Ice Cream Doesn't Cause Drowning: Benchmarking LLMs Against Statistical Pitfalls in Causal Inference",
+        "abstract": (
+            "We evaluate large language models on causal reasoning benchmarks "
+            "and statistical pitfalls in causal inference."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/ice_cream_causal_llm.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Causal Reasoning with LLMs benchmark",
+        paper,
+    )
+
+    assert subtype.label == "causal_reasoning_benchmark"
+    assert _index()._topic_rejection_reason("Causal Reasoning with LLMs benchmark", paper) == ""
+
+
+def test_counterfactual_inference_gate_rejects_generic_bayes() -> None:
+    paper = {
+        "title": "Large Language Bayes",
+        "abstract": (
+            "This paper studies Bayesian posterior inference for language models "
+            "and probabilistic program induction."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/large_language_bayes.pdf",
+    }
+
+    assert _index()._topic_rejection_reason(
+        "Counterfactual Inference probabilistic modeling",
+        paper,
+    ) == "Counterfactual inference query requires counterfactual/treatment-effect/causal-inference signal"
+
+
+def test_counterfactual_inference_gate_classifies_treatment_effect() -> None:
+    paper = {
+        "title": "Causal Contrastive Learning for Counterfactual Regression Over Time",
+        "abstract": (
+            "The method estimates heterogeneous treatment effects and potential "
+            "outcomes for counterfactual regression."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/counterfactual_regression.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Counterfactual Inference representation learning",
+        paper,
+    )
+
+    assert subtype.label == "treatment_effect_estimation"
+    assert _index()._topic_rejection_reason("Counterfactual Inference representation learning", paper) == ""
+
+
+def test_multi_hop_graph_gate_rejects_generic_gnn_representation() -> None:
+    paper = {
+        "title": "GPEN: Global Position Encoding Network for Enhanced Subgraph Representation Learning",
+        "abstract": (
+            "The paper improves graph neural network representation learning for "
+            "subgraphs through global position encodings."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/gpen.pdf",
+    }
+
+    assert _index()._topic_rejection_reason(
+        "Multi-hop Reasoning on Graphs representation learning",
+        paper,
+    ) == "Multi-hop graph reasoning query excludes generic graph representation learning"
+
+
+def test_multi_hop_graph_gate_classifies_kgqa_benchmark() -> None:
+    paper = {
+        "title": "M3GQA: A Multi-Entity Multi-Hop Multi-Setting Graph Question Answering Benchmark",
+        "abstract": (
+            "This benchmark evaluates multi-hop graph question answering over "
+            "knowledge graphs with complex reasoning paths."
+        ),
+        "focused_text": "",
+        "pdf_path": "/papers/m3gqa.pdf",
+    }
+
+    subtype = _index()._source_subtype_for_topic(
+        "Multi-hop Reasoning on Graphs benchmark dataset",
+        paper,
+    )
+
+    assert subtype.label == "graph_reasoning_benchmark"
+    assert _index()._topic_rejection_reason("Multi-hop Reasoning on Graphs benchmark dataset", paper) == ""

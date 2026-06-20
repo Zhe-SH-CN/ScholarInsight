@@ -1126,6 +1126,8 @@ class EvidenceStructuringAgent(BaseAgent):
                     source_title=document.title,
                     source_url=document.url,
                     source_id=document.source_id,
+                    source_subtype=document.source_subtype,
+                    source_subtype_reason=document.source_subtype_reason,
                     confidence=confidence,
                     reasoning_pattern=reasoning_pattern,
                     bottleneck=bottleneck,
@@ -1163,6 +1165,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "fact": ev.fact,
                 "quote": ev.quote[:200],
                 "source_type": ev.source_type,
+                "source_subtype": ev.source_subtype,
                 "source_url": ev.source_url,
                 "confidence": ev.confidence,
             })
@@ -1180,17 +1183,18 @@ class AnalysisAndReviewAgent(BaseAgent):
                 "好的 Claim 要回答：'在这个推理模式上，这些论文之间的关键创新差异是什么？这对该领域意味着什么？'\n"
                 "\n"
                 "【结论生成要求 - 严格执行】\n"
-                "1. 【推理模式对比型】结论：必须引用 >=2 篇不同论文的证据\n"
+                "1. 先生成 atomic observation，再生成 synthesis claim；不要直接从大证据池跳到领域趋势。\n"
+                "2. 【推理模式对比型】结论：必须引用 >=2 篇不同论文，且来源角色/source_subtype 应一致或明确互补\n"
                 "   ✓ '在跨领域综合模式上，论文A将知识图谱引入LLM推理，而论文B则从多模态角度进行综合'\n"
                 "   ✗ 如果只有1篇论文有证据，禁止生成对比型结论\n"
-                "2. 【单论文洞察型】结论：必须引用 >=2 条来自同一论文的证据\n"
+                "3. 【单论文洞察型】结论：必须引用 >=2 条来自同一论文的证据，并显式写成'作为单论文观察'\n"
                 "   ✓ '论文C的表征转换创新在于将图结构转化为序列表示，有2条证据支持'\n"
                 "   ✗ 如果只有1条证据，只能生成描述性结论，措辞必须保守\n"
-                "3. 禁止生成【无实质内容的废话型】结论：\n"
+                "4. 禁止生成【无实质内容的废话型】结论：\n"
                 "   '各论文均在积极探索'（×）'方法较为新颖'（×）\n"
-                "4. 每条 Claim 必须绑定 supporting_evidence_ids，且 evidence_id 必须真实存在\n"
-                "5. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
-                "6. confidence 反映证据充分程度：\n"
+                "5. 每条 Claim 必须绑定 supporting_evidence_ids，且 evidence_id 必须真实存在\n"
+                "6. 关注推理模式的分布：哪些模式被大量论文使用（热点），哪些模式被忽视（研究空白）\n"
+                "7. confidence 反映证据充分程度：\n"
                 "   - 多篇论文交叉验证 → 0.75-0.85\n"
                 "   - 单篇论文多条证据 → 0.60-0.75\n"
                 "   - 仅1条证据 → 0.45-0.55（措辞必须非常保守）\n"
@@ -1216,7 +1220,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                 + "\n\n".join(
                     f"=== {DIMENSION_LABELS.get(dim, dim)} 维度（{len(items)} 条证据，来自 {len(set(ev['paper'] for ev in items if ev['paper']))} 篇论文）===\n"
                     + "\n".join(
-                        f"[{ev['evidence_id']}] {ev['paper'] or '?'} | {ev['source_type']} | "
+                        f"[{ev['evidence_id']}] {ev['paper'] or '?'} | {ev['source_type']} | {ev.get('source_subtype') or 'unclassified'} | "
                         f"置信度{ev['confidence']:.2f}\n事实：{ev['fact']}\n摘要：{ev['quote'][:120]}"
                         for ev in items[:8]
                     )
@@ -1287,7 +1291,7 @@ class AnalysisAndReviewAgent(BaseAgent):
                     generated_by_skill=self.skill_id,
                 )
             )
-        final_claims = merge_claims(claims, deterministic_claims)
+        final_claims = merge_claims(deterministic_claims, claims)
         await self.record_llm_event(
             "progress",
             "claims_generated",
@@ -1312,12 +1316,19 @@ class AnalysisAndReviewAgent(BaseAgent):
             "专门从反方视角审查论文推理模式分析结论的可信度和风险。\n"
             "\n"
             "【审查维度】（每条 Claim 逐一检查）\n"
-            "1. 【来源单一风险】：所有证据来自同一论文或同一来源 → severity=high\n"
+            "1. 【来源单一风险】：跨论文 synthesis 少于 2 篇独立论文 → severity=high；"
+            "single_paper_observation 如果明确限定为单论文观察，不因来源单一被挑战\n"
             "2. 【证据不足风险】：仅 1 条证据支撑强结论 → severity=medium/high\n"
             "3. 【过度推断风险】：结论超出证据直接支持的范围 → severity=medium\n"
             "4. 【时效风险】：证据可能过时（快速演进方向中，较旧论文需标注时间边界）→ severity=low\n"
             "5. 【措辞风险】：使用了'最好'、'唯一'、'绝对'等绝对化表述而证据不支撑 → severity=medium\n"
             "6. 【实验验证缺失】：理论分析充分但缺乏实验结果佐证 → severity=low\n"
+            "7. 【source role 混杂】：把 benchmark、应用案例、通用图学习、核心方法混成同一结论 → severity=medium/high\n"
+            "\n"
+            "【学术证据边界】\n"
+            "- 学术 survey 级 observation 可以由独立论文证据支撑；不要默认要求 code repo、社区复现或 leaderboard。\n"
+            "- 只有当 claim 声称可复现性、工程采用、社区影响或 SOTA 排名时，才要求代码/leaderboard/社区证据。\n"
+            "- single_paper_observation 可以 verified，但 final_wording 必须保留'作为单论文观察'或等价限定。\n"
             "\n"
             "【验证状态标准】\n"
             "- verified：多源交叉验证，结论措辞保守，无明显风险\n"
@@ -1352,9 +1363,13 @@ class AnalysisAndReviewAgent(BaseAgent):
                     "claim_id": claim.claim_id,
                     "claim": claim.claim,
                     "dimension": claim.dimension,
+                    "claim_type": claim.claim_type,
+                    "source_paper_count": claim.source_paper_count,
                     "supporting_evidence_ids": claim.supporting_evidence_ids[:5],  # 限制数量
                     "confidence": claim.confidence,
                     "evidence_source_types": source_types,
+                    "evidence_source_papers": list({ev.paper or ev.source_title or ev.source_url for ev in supporting_evs})[:5],
+                    "evidence_source_subtypes": list({ev.source_subtype for ev in supporting_evs if ev.source_subtype})[:5],
                     "unique_source_count": source_count,
                     "current_notes": [note.model_dump(mode="json") for note in claim.red_team_notes[:2]],
                 })
@@ -2624,6 +2639,8 @@ def deterministic_red_team(claims: list[Claim], evidence: list[Evidence]) -> lis
         supporting = [by_id[ev_id] for ev_id in claim.supporting_evidence_ids if ev_id in by_id]
         source_domains = {urlparse(ev.source_url).netloc for ev in supporting}
         source_papers = {ev.paper or ev.source_title or ev.source_url for ev in supporting}
+        source_types = {ev.source_type for ev in supporting}
+        academic_evidence = bool(source_types) and source_types.issubset({"academic_paper", "local_paper"})
         claim.source_paper_count = len(source_papers)
         if claim.source_paper_count >= 2:
             claim.claim_type = "comparative"
@@ -2645,12 +2662,21 @@ def deterministic_red_team(claims: list[Claim], evidence: list[Evidence]) -> lis
                     severity="high",
                 )
             )
-        if len(source_domains) < 2:
+        if claim.claim_type == "comparative" and claim.source_paper_count < 2:
             notes.append(
                 RedTeamNote(
                     risk_type="single_source",
-                    comment="支持证据主要来自单一域名，存在来源单一风险。",
-                    suggested_action="补充第三方资料、文档或社区讨论来源。",
+                    comment="跨论文 synthesis 未达到 2 篇独立论文支撑。",
+                    suggested_action="补充独立论文证据，或降级为 single_paper_observation。",
+                    severity="high",
+                )
+            )
+        elif supporting and not academic_evidence and len(source_domains) < 2:
+            notes.append(
+                RedTeamNote(
+                    risk_type="single_domain",
+                    comment="非学术来源主要来自单一域名，存在来源单一风险。",
+                    suggested_action="补充独立第三方资料后再提升表达强度。",
                     severity="medium",
                 )
             )

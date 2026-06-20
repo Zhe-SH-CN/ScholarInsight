@@ -801,6 +801,9 @@ class LocalPaperIndex:
                 return subtype.rejection_reason
             if not primary_has_rag:
                 return "RAG+KG query requires title/abstract retrieval-augmented generation signal"
+        subtype = self._source_subtype_for_topic(query, paper, target_topic=target_topic)
+        if subtype.rejection_reason:
+            return subtype.rejection_reason
         return ""
 
     def _source_subtype_for_topic(
@@ -819,6 +822,13 @@ class LocalPaperIndex:
             or {"retrieval", "augmented", "generation"}.issubset(terms)
         )
         if not (query_needs_kg and query_needs_rag):
+            family = self._topic_family(gate_query)
+            if family == "causal_reasoning_llm":
+                return self._causal_reasoning_llm_subtype(paper)
+            if family == "counterfactual_inference":
+                return self._counterfactual_inference_subtype(paper)
+            if family == "multi_hop_graph_reasoning":
+                return self._multi_hop_graph_subtype(paper)
             return SourceSubtype("unclassified", "")
 
         title = canonical_paper_title(paper)
@@ -963,6 +973,219 @@ class LocalPaperIndex:
         return SourceSubtype(
             "rag_kg_adjacent",
             "paper has RAG and knowledge graph signals but lacks a strong KG-RAG method marker",
+        )
+
+    def _topic_family(self, query: str) -> str:
+        lower = query.lower()
+        terms = set(query_terms(query))
+        has_llm = (
+            "llm" in terms
+            or "large language model" in lower
+            or "large language models" in lower
+            or "language model" in lower
+            or "language models" in lower
+        )
+        if "counterfactual inference" in lower or {"counterfactual", "inference"}.issubset(terms):
+            return "counterfactual_inference"
+        if has_llm and ("causal reasoning" in lower or {"causal", "reasoning"}.issubset(terms)):
+            return "causal_reasoning_llm"
+        if (
+            ("multi-hop" in lower or "multi hop" in lower or "multihop" in lower or {"multi", "hop"}.issubset(terms))
+            and ("graph" in terms or "knowledge graph" in lower or "knowledge graphs" in lower)
+        ):
+            return "multi_hop_graph_reasoning"
+        return ""
+
+    def _paper_primary_compact(self, paper: dict) -> tuple[str, str]:
+        title = canonical_paper_title(paper).lower()
+        abstract = str(paper.get("abstract") or "").lower()
+        primary = f"{title}\n{abstract}"
+        return re.sub(r"\s+", " ", title), re.sub(r"\s+", " ", primary)
+
+    def _causal_reasoning_llm_subtype(self, paper: dict) -> SourceSubtype:
+        title, primary = self._paper_primary_compact(paper)
+        has_llm = any(
+            marker in primary
+            for marker in (
+                "large language model",
+                "large language models",
+                "language model",
+                "language models",
+                "llm",
+                "llms",
+                "chain-of-thought",
+                "chain of thought",
+            )
+        )
+        has_causal_reasoning = any(
+            marker in primary
+            for marker in (
+                "causal reasoning",
+                "counterfactual reasoning",
+                "causal inference",
+                "causal abilities",
+                "causal ability",
+                "causal question",
+                "causal benchmark",
+                "statistical pitfalls in causal inference",
+            )
+        )
+        autoregressive_only = (
+            "causal language modeling" in primary
+            or "causal llm inference" in primary
+            or "causal attention" in primary
+        ) and not has_causal_reasoning
+        if not has_llm or not has_causal_reasoning or autoregressive_only:
+            return SourceSubtype(
+                "llm_reasoning_adjacent",
+                "paper lacks explicit causal/counterfactual reasoning evidence for LLMs",
+                "Causal reasoning with LLMs query requires causal/counterfactual reasoning and LLM signal",
+            )
+        if "benchmark" in title or "evaluat" in primary or "pitfall" in primary:
+            return SourceSubtype(
+                "causal_reasoning_benchmark",
+                "paper evaluates causal/counterfactual reasoning ability in LLMs",
+            )
+        if "counterfactual" in primary:
+            return SourceSubtype(
+                "llm_counterfactual_reasoning",
+                "paper studies counterfactual reasoning with language models",
+            )
+        return SourceSubtype(
+            "core_llm_causal_reasoning",
+            "paper directly studies causal reasoning with language models",
+        )
+
+    def _counterfactual_inference_subtype(self, paper: dict) -> SourceSubtype:
+        title, primary = self._paper_primary_compact(paper)
+        has_counterfactual = "counterfactual" in primary
+        has_treatment = any(
+            marker in primary
+            for marker in (
+                "treatment effect",
+                "treatment effects",
+                "cate",
+                "heterogeneous treatment",
+                "individualized treatment",
+                "potential outcome",
+                "potential outcomes",
+            )
+        )
+        has_causal_inference = any(
+            marker in primary
+            for marker in (
+                "causal inference",
+                "causal effect",
+                "causal effects",
+                "structural causal model",
+                "structural causal models",
+                "unconfoundedness",
+                "causal discovery",
+                "causal mechanism",
+            )
+        )
+        if not (has_counterfactual or has_treatment or has_causal_inference):
+            return SourceSubtype(
+                "probabilistic_or_ml_adjacent",
+                "paper lacks counterfactual, treatment-effect, or causal-inference signal",
+                "Counterfactual inference query requires counterfactual/treatment-effect/causal-inference signal",
+            )
+        if has_counterfactual and ("explanation" in primary or "fairness" in primary):
+            return SourceSubtype(
+                "counterfactual_explanation_or_fairness",
+                "paper studies counterfactual explanations or counterfactual fairness",
+            )
+        if has_treatment:
+            return SourceSubtype(
+                "treatment_effect_estimation",
+                "paper focuses treatment-effect or potential-outcome estimation",
+            )
+        if has_counterfactual:
+            return SourceSubtype(
+                "core_counterfactual_inference",
+                "paper explicitly studies counterfactual inference or estimation",
+            )
+        return SourceSubtype(
+            "causal_inference_adjacent",
+            "paper is causal-inference adjacent but not explicitly counterfactual",
+        )
+
+    def _multi_hop_graph_subtype(self, paper: dict) -> SourceSubtype:
+        title, primary = self._paper_primary_compact(paper)
+        has_graph = (
+            "graph" in primary
+            or "graphs" in primary
+            or "knowledge graph" in primary
+            or "knowledge graphs" in primary
+            or " kg " in f" {primary} "
+        )
+        has_multihop = (
+            "multi-hop" in primary
+            or "multi hop" in primary
+            or "multihop" in primary
+            or "long-range" in primary
+            or "long range" in primary
+        )
+        has_reasoning = any(
+            marker in primary
+            for marker in (
+                "reasoning",
+                "question answering",
+                "semantic parsing",
+                "path reasoning",
+                "knowledge graph reasoning",
+                "graph question answering",
+                "kgqa",
+            )
+        )
+        generic_graph_ml = any(
+            marker in primary
+            for marker in (
+                "node classification",
+                "representation learning",
+                "message passing",
+                "graph neural network",
+                "graph neural networks",
+                "graph out-of-distribution",
+                "subgraph representation",
+            )
+        )
+        if has_graph and generic_graph_ml and not (has_multihop or has_reasoning):
+            return SourceSubtype(
+                "graph_ml_adjacent",
+                "paper is generic graph representation/propagation work rather than multi-hop graph reasoning",
+                "Multi-hop graph reasoning query excludes generic graph representation learning",
+            )
+        if not has_graph or not (has_multihop or has_reasoning):
+            return SourceSubtype(
+                "graph_or_reasoning_adjacent",
+                "paper lacks explicit graph-based multi-hop reasoning signal",
+                "Multi-hop graph reasoning query requires graph plus multi-hop/reasoning/QA signal",
+            )
+        if generic_graph_ml and not has_reasoning:
+            return SourceSubtype(
+                "graph_ml_adjacent",
+                "paper is generic graph representation/propagation work rather than multi-hop graph reasoning",
+                "Multi-hop graph reasoning query excludes generic graph representation learning",
+            )
+        if "benchmark" in title or "dataset" in title:
+            return SourceSubtype(
+                "graph_reasoning_benchmark",
+                "paper benchmarks multi-hop or graph question answering",
+            )
+        if "question answering" in primary or "semantic parsing" in primary or "kgqa" in primary:
+            return SourceSubtype(
+                "kgqa_or_graph_reasoning",
+                "paper centers graph/KG question answering or semantic parsing",
+            )
+        if "rag" in primary or "retrieval-augmented" in primary or "retrieval augmented" in primary:
+            return SourceSubtype(
+                "graph_retrieval_rag_adjacent",
+                "paper connects graph reasoning with retrieval-augmented generation",
+            )
+        return SourceSubtype(
+            "core_multi_hop_graph_reasoning",
+            "paper directly studies multi-hop reasoning on graph-structured knowledge",
         )
 
     def _pseudo_query_embedding(

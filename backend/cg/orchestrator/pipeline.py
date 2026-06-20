@@ -30,6 +30,7 @@ from cg.repositories.evidence import EvidenceRepository
 from cg.repositories.run import RunRepository
 from cg.schemas.research import (
     Claim,
+    EvidenceCluster,
     PaperPatternMatrix,
     PaperProfile,
     DEFAULT_DIMENSIONS,
@@ -574,6 +575,7 @@ class ResearchPipeline:
                     average_fn=average,
                     unique_strings_fn=unique_strings,
                 )
+                artifacts["evidence_clusters"] = build_evidence_clusters(all_evidence, reviewed_claims)
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -873,6 +875,7 @@ class ResearchPipeline:
                     average_fn=average,
                     unique_strings_fn=unique_strings,
                 )
+                artifacts["evidence_clusters"] = build_evidence_clusters(all_evidence, reviewed_claims)
                 await self.save_artifacts(run_id, artifacts)
                 metrics.matrix_cell_count = len(artifacts["matrix"].cells)
                 metrics.recommendation_count = len(artifacts["recommendations"])
@@ -1303,47 +1306,26 @@ class ResearchPipeline:
         return evidence_items
 
     async def generate_claims(self, run_id: str, evidence: list[Evidence], request: ResearchRequest | None = None) -> list[Claim]:
-        grouped: dict[str, list[Evidence]] = defaultdict(list)
-        for item in evidence:
-            grouped[item.dimension].append(item)
-
-        deterministic_claims: list[Claim] = []
-        for dimension, items in grouped.items():
-            if not items:
-                continue
-            items = sorted(items, key=lambda ev: ev.confidence, reverse=True)
-            dimension_label = DIMENSION_LABELS.get(dimension, dimension)
-            by_paper: dict[str, list[Evidence]] = defaultdict(list)
-            for item in items:
-                by_paper[item.paper or "相关论文"].append(item)
-
-            top_papers = sorted(by_paper, key=lambda name: len(by_paper[name]), reverse=True)[:5]
-            if len(top_papers) >= 2:
-                supporting = [ev for name in top_papers for ev in by_paper[name][:2]][:8]
-                facts = "；".join(f"{name}：{by_paper[name][0].fact}" for name in top_papers[:4] if by_paper[name])
-                deterministic_claims.append(build_claim_from_support(
-                    run_id,
-                    dimension,
-                    dimension_label,
-                    f"在{dimension_label}维度，公开证据显示不同论文的重点明显不同：{facts}",
-                    supporting,
-                    f"该横向结论聚合 {len(items)} 条 Evidence，覆盖 {len(top_papers)} 篇论文。",
-                ))
-
-            for paper, paper_items in list(by_paper.items())[:6]:
-                supporting = paper_items[:5]
-                if len(supporting) < 2:
-                    continue
-                fact_snippet = "；".join(ev.fact for ev in supporting[:2])
-                deterministic_claims.append(build_claim_from_support(
-                    run_id,
-                    dimension,
-                    dimension_label,
-                    f"{paper} 在{dimension_label}维度的创新证据集中体现为：{fact_snippet}",
-                    supporting,
-                    f"该论文结论由 {len(paper_items)} 条 Evidence 支持。",
-                ))
-        claims = await AnalysisAndReviewAgent(self.agent_context(run_id)).generate(evidence, deterministic_claims, request)
+        clusters = build_evidence_clusters(evidence)
+        deterministic_claims = build_claims_from_clusters(run_id, clusters, evidence)
+        representative_evidence = select_cluster_representative_evidence(evidence, clusters)
+        await self.trace(
+            run_id,
+            "AnalysisAndReviewAgent",
+            "progress",
+            "evidence_clustered",
+            f"构建 {len(clusters)} 个 Evidence cluster，用 {len(representative_evidence)} 条代表性 Evidence 生成 Claim",
+            {
+                "cluster_count": len(clusters),
+                "representative_evidence_count": len(representative_evidence),
+                "cluster_claim_count": len(deterministic_claims),
+            },
+        )
+        claims = await AnalysisAndReviewAgent(self.agent_context(run_id)).generate(
+            representative_evidence,
+            deterministic_claims,
+            request,
+        )
         return claims
 
     async def red_team(
@@ -1373,12 +1355,14 @@ class ResearchPipeline:
         recommendations = artifacts["recommendations"]
         evidence_graph = artifacts["evidence_graph"]
         observability = artifacts["observability"]
+        evidence_clusters = artifacts.get("evidence_clusters", [])
         await atomic_write_json(run_dir / "exports" / "matrix.json", matrix)
         await write_text(run_dir / "exports" / "matrix.csv", build_matrix_csv(matrix))
         await atomic_write_json(run_dir / "exports" / "recommendations.json", recommendations)
         await write_text(run_dir / "exports" / "recommendations.md", build_recommendations_markdown(recommendations))
         await atomic_write_json(run_dir / "exports" / "observability.json", observability)
         await atomic_write_json(run_dir / "exports" / "evidence_graph.json", evidence_graph)
+        await atomic_write_json(run_dir / "exports" / "evidence_clusters.json", evidence_clusters)
 
     async def write_report(
         self,
@@ -1628,6 +1612,469 @@ def build_claim_from_support(
     )
 
 
+CLUSTER_HINTS: dict[str, tuple[str, ...]] = {
+    "evaluation_benchmark": (
+        "benchmark",
+        "dataset",
+        "evaluation",
+        "metric",
+        "contamination",
+        "leaderboard",
+    ),
+    "verification_reward": (
+        "verifier",
+        "verification",
+        "reward model",
+        "process reward",
+        "proof",
+        "grader",
+    ),
+    "search_inference_control": (
+        "self-consistency",
+        "tree search",
+        "best-of",
+        "test-time",
+        "inference-time",
+        "decoding",
+        "search",
+    ),
+    "data_generation_training": (
+        "synthetic data",
+        "instruction tuning",
+        "fine-tuning",
+        "training data",
+        "distillation",
+        "data generation",
+    ),
+    "modular_system_pipeline": (
+        "pipeline",
+        "module",
+        "planner",
+        "solver",
+        "agent",
+        "tool",
+        "retrieval",
+    ),
+    "representation_formalization": (
+        "representation",
+        "symbolic",
+        "formal",
+        "equation",
+        "program",
+        "natural language",
+    ),
+    "uncertainty_probabilistic": (
+        "uncertainty",
+        "probabilistic",
+        "bayesian",
+        "calibration",
+        "confidence",
+    ),
+    "efficiency_scaling": (
+        "efficient",
+        "efficiency",
+        "compression",
+        "token",
+        "cost",
+        "scaling",
+    ),
+    "robustness_adversarial": (
+        "adversarial",
+        "robustness",
+        "bias",
+        "attack",
+        "failure",
+    ),
+}
+
+CLUSTER_LABELS: dict[str, str] = {
+    "evaluation_benchmark": "evaluation and benchmark design",
+    "verification_reward": "verification and reward modeling",
+    "search_inference_control": "search and inference-time control",
+    "data_generation_training": "data generation and training",
+    "modular_system_pipeline": "modular system pipeline",
+    "representation_formalization": "representation and formalization",
+    "uncertainty_probabilistic": "uncertainty and probabilistic modeling",
+    "efficiency_scaling": "efficiency and scaling",
+    "robustness_adversarial": "robustness and adversarial analysis",
+}
+
+CLUSTER_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "that",
+    "this",
+    "into",
+    "large",
+    "language",
+    "models",
+    "model",
+    "paper",
+    "method",
+    "methods",
+    "reasoning",
+    "using",
+    "based",
+    "through",
+    "approach",
+    "task",
+    "tasks",
+}
+
+SYNTHESIS_SOURCE_ROLES = {
+    "core_kg_rag_method",
+    "benchmark_or_analysis",
+    "core_llm_causal_reasoning",
+    "causal_reasoning_benchmark",
+    "llm_counterfactual_reasoning",
+    "core_counterfactual_inference",
+    "treatment_effect_estimation",
+    "counterfactual_explanation_or_fairness",
+    "causal_inference_adjacent",
+    "core_multi_hop_graph_reasoning",
+    "kgqa_or_graph_reasoning",
+    "graph_reasoning_benchmark",
+    "graph_retrieval_rag_adjacent",
+}
+
+SOURCE_ROLE_LABELS = {
+    "core_kg_rag_method": "core KG-RAG method",
+    "benchmark_or_analysis": "benchmark/analysis",
+    "core_llm_causal_reasoning": "core LLM causal reasoning",
+    "causal_reasoning_benchmark": "LLM causal reasoning benchmark",
+    "llm_counterfactual_reasoning": "LLM counterfactual reasoning",
+    "core_counterfactual_inference": "core counterfactual inference",
+    "treatment_effect_estimation": "treatment-effect estimation",
+    "counterfactual_explanation_or_fairness": "counterfactual explanation/fairness",
+    "causal_inference_adjacent": "causal inference adjacent",
+    "core_multi_hop_graph_reasoning": "core multi-hop graph reasoning",
+    "kgqa_or_graph_reasoning": "KGQA/graph reasoning",
+    "graph_reasoning_benchmark": "graph reasoning benchmark",
+    "graph_retrieval_rag_adjacent": "graph retrieval/RAG adjacent",
+}
+
+
+def build_evidence_clusters(evidence: list[Evidence], claims: list[Claim] | None = None) -> list[EvidenceCluster]:
+    grouped: dict[tuple[str, str], list[Evidence]] = defaultdict(list)
+    labels: dict[tuple[str, str], str] = {}
+    for ev in evidence:
+        dimension = ev.dimension or "other"
+        key, label = evidence_cluster_key(ev)
+        grouped[(dimension, key)].append(ev)
+        labels[(dimension, key)] = label
+
+    claims = claims or []
+    claim_cluster_ids: dict[str, str] = {}
+    for claim in claims:
+        cluster_id = claim.evidence_cluster_id or infer_claim_cluster_id(claim, grouped)
+        if cluster_id:
+            claim_cluster_ids[claim.claim_id] = cluster_id
+
+    clusters: list[EvidenceCluster] = []
+    for (dimension, key), items in grouped.items():
+        sorted_items = sorted(items, key=lambda ev: ev.confidence, reverse=True)
+        papers = unique_strings([paper_key(ev) for ev in sorted_items])
+        cluster_id = stable_id("cluster", f"{dimension}:{key}")
+        verified_claim_ids = [
+            claim.claim_id
+            for claim in claims
+            if claim_cluster_ids.get(claim.claim_id) == cluster_id
+            and claim.verification_status == "verified"
+            and claim.risk_level != "high"
+        ]
+        challenged_claim_ids = [
+            claim.claim_id
+            for claim in claims
+            if claim_cluster_ids.get(claim.claim_id) == cluster_id
+            and claim.claim_id not in verified_claim_ids
+        ]
+        status = (
+            "verified"
+            if verified_claim_ids
+            else "single_paper"
+            if len(papers) < 2
+            else "backlog"
+            if challenged_claim_ids
+            else "candidate"
+        )
+        clusters.append(
+            EvidenceCluster(
+                cluster_id=cluster_id,
+                dimension=dimension,
+                dimension_label=DIMENSION_LABELS.get(dimension, dimension),
+                label=labels.get((dimension, key), key),
+                summary=cluster_summary(sorted_items),
+                mechanism=most_common_nonempty([ev.mechanism for ev in sorted_items]),
+                bottleneck=most_common_nonempty([ev.bottleneck for ev in sorted_items]),
+                evidence_ids=[ev.evidence_id for ev in sorted_items],
+                papers=papers,
+                evidence_count=len(sorted_items),
+                independent_paper_count=len(papers),
+                average_confidence=round(average([ev.confidence for ev in sorted_items]), 3),
+                verified_claim_ids=verified_claim_ids,
+                challenged_claim_ids=challenged_claim_ids,
+                status=status,
+            )
+        )
+    return sorted(
+        clusters,
+        key=lambda cluster: (
+            cluster.status != "verified",
+            -cluster.independent_paper_count,
+            -cluster.evidence_count,
+            cluster.dimension,
+            cluster.label,
+        ),
+    )
+
+
+def build_claims_from_clusters(run_id: str, clusters: list[EvidenceCluster], evidence: list[Evidence], limit: int = 32) -> list[Claim]:
+    by_id = {ev.evidence_id: ev for ev in evidence}
+    claims: list[Claim] = []
+    candidate_clusters = sorted(
+        clusters,
+        key=lambda cluster: (
+            -cluster.independent_paper_count,
+            -cluster.evidence_count,
+            -cluster.average_confidence,
+            cluster.dimension,
+        ),
+    )
+
+    atomic_limit = max(1, limit // 2)
+    for cluster in candidate_clusters:
+        for supporting in select_atomic_observation_supports(cluster, by_id):
+            paper = paper_key(supporting[0])
+            paper_facts = cluster_paper_facts(supporting)
+            claim_text = (
+                f"作为单论文观察，{paper} 在{cluster.dimension_label}维度呈现"
+                f"'{cluster.label}' 证据：{paper_facts}"
+            )
+            reasoning = (
+                f"该 observation 只绑定 {paper} 的 {len(supporting)} 条 Evidence，"
+                "不作为跨论文领域趋势。"
+            )
+            claim = build_claim_from_support(
+                run_id,
+                cluster.dimension,
+                cluster.dimension_label,
+                claim_text,
+                supporting,
+                reasoning,
+            )
+            claim.claim_type = "single_paper_observation"
+            claim.evidence_support_level = "single_paper"
+            claim.source_paper_count = 1
+            claim.evidence_cluster_id = cluster.cluster_id
+            claim.evidence_cluster_label = cluster.label
+            claims.append(claim)
+            if len(claims) >= atomic_limit:
+                break
+        if len(claims) >= atomic_limit:
+            break
+
+    for cluster in candidate_clusters:
+        supporting, source_role = select_synthesis_support(cluster, by_id)
+        if len(supporting) < 2:
+            continue
+        paper_count = len({paper_key(ev) for ev in supporting})
+        if paper_count < 2:
+            continue
+        paper_facts = cluster_paper_facts(supporting)
+        source_role_label = SOURCE_ROLE_LABELS.get(source_role, source_role.replace("_", " "))
+        claim_text = (
+            f"在{cluster.dimension_label}维度，至少 {paper_count} 篇 {source_role_label} 论文"
+            f"在'{cluster.label}' 上提供了相近证据：{paper_facts}"
+        )
+        reasoning = (
+            f"该 synthesis 只合并同一 source role（{source_role_label}）内的证据，"
+            f"覆盖 {paper_count} 篇独立论文。"
+        )
+        claim = build_claim_from_support(
+            run_id,
+            cluster.dimension,
+            cluster.dimension_label,
+            claim_text,
+            supporting,
+            reasoning,
+        )
+        claim.evidence_cluster_id = cluster.cluster_id
+        claim.evidence_cluster_label = cluster.label
+        claims.append(claim)
+        if len(claims) >= limit:
+            break
+    return claims
+
+
+def select_cluster_representative_evidence(
+    evidence: list[Evidence], clusters: list[EvidenceCluster], max_evidence: int = 120
+) -> list[Evidence]:
+    if len(evidence) <= max_evidence:
+        return evidence
+    by_id = {ev.evidence_id: ev for ev in evidence}
+    selected: list[Evidence] = []
+    seen: set[str] = set()
+    ranked_clusters = sorted(
+        clusters,
+        key=lambda cluster: (
+            -cluster.independent_paper_count,
+            -cluster.evidence_count,
+            -cluster.average_confidence,
+        ),
+    )
+    for cluster in ranked_clusters:
+        per_cluster_limit = 8 if cluster.independent_paper_count >= 2 else 4
+        for ev_id in cluster.evidence_ids[:per_cluster_limit]:
+            if ev_id in seen or ev_id not in by_id:
+                continue
+            selected.append(by_id[ev_id])
+            seen.add(ev_id)
+            if len(selected) >= max_evidence:
+                return selected
+    return selected or evidence[:max_evidence]
+
+
+def evidence_cluster_key(ev: Evidence) -> tuple[str, str]:
+    text = " ".join([ev.mechanism, ev.bottleneck, ev.fact, ev.quote, ev.paper or "", ev.source_title]).lower()
+    preferred_keys = {
+        "inference_time_control": ["search_inference_control", "verification_reward"],
+        "data_evaluation_engineering": ["evaluation_benchmark"],
+        "principled_probabilistic_modeling": ["uncertainty_probabilistic"],
+        "approximation_engineering": ["efficiency_scaling"],
+    }.get(ev.dimension, [])
+    for key in preferred_keys:
+        hints = CLUSTER_HINTS.get(key, ())
+        if any(hint in text for hint in hints):
+            return key, CLUSTER_LABELS[key]
+    for key, hints in CLUSTER_HINTS.items():
+        if any(hint in text for hint in hints):
+            return key, CLUSTER_LABELS[key]
+    tokens = [
+        token
+        for token in re.findall(r"[a-z][a-z0-9-]{3,}", text)
+        if token not in CLUSTER_STOPWORDS
+    ]
+    token_counts = Counter(tokens)
+    label_tokens = [token for token, _ in token_counts.most_common(3)]
+    if label_tokens:
+        label = " / ".join(label_tokens)
+        return f"lexical_{'_'.join(label_tokens)}", label
+    return "general", "general evidence pattern"
+
+
+def infer_claim_cluster_id(claim: Claim, grouped: dict[tuple[str, str], list[Evidence]]) -> str:
+    evidence_ids = set(claim.supporting_evidence_ids)
+    best_cluster_id = ""
+    best_overlap = 0
+    for (dimension, key), items in grouped.items():
+        if dimension != claim.dimension:
+            continue
+        overlap = len(evidence_ids.intersection({ev.evidence_id for ev in items}))
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best_cluster_id = stable_id("cluster", f"{dimension}:{key}")
+    return best_cluster_id
+
+
+def select_cluster_support(cluster: EvidenceCluster, by_id: dict[str, Evidence]) -> list[Evidence]:
+    items = [by_id[ev_id] for ev_id in cluster.evidence_ids if ev_id in by_id]
+    by_paper: dict[str, list[Evidence]] = defaultdict(list)
+    for item in items:
+        by_paper[paper_key(item)].append(item)
+    supporting: list[Evidence] = []
+    for paper in sorted(by_paper, key=lambda name: len(by_paper[name]), reverse=True):
+        supporting.extend(sorted(by_paper[paper], key=lambda ev: ev.confidence, reverse=True)[:2])
+        if len(supporting) >= 8:
+            break
+    return supporting[:8]
+
+
+def select_atomic_observation_supports(cluster: EvidenceCluster, by_id: dict[str, Evidence]) -> list[list[Evidence]]:
+    items = [by_id[ev_id] for ev_id in cluster.evidence_ids if ev_id in by_id]
+    by_paper: dict[str, list[Evidence]] = defaultdict(list)
+    for item in items:
+        by_paper[paper_key(item)].append(item)
+    supports: list[list[Evidence]] = []
+    for paper in sorted(by_paper, key=lambda name: (len(by_paper[name]), average([ev.confidence for ev in by_paper[name]])), reverse=True):
+        paper_items = sorted(by_paper[paper], key=lambda ev: ev.confidence, reverse=True)
+        if len(paper_items) < 2:
+            continue
+        supports.append(paper_items[: min(3, len(paper_items))])
+        if len(supports) >= 2:
+            break
+    return supports
+
+
+def select_synthesis_support(cluster: EvidenceCluster, by_id: dict[str, Evidence]) -> tuple[list[Evidence], str]:
+    items = [by_id[ev_id] for ev_id in cluster.evidence_ids if ev_id in by_id]
+    by_role: dict[str, list[Evidence]] = defaultdict(list)
+    for item in items:
+        role = item.source_subtype or "unclassified"
+        if role not in SYNTHESIS_SOURCE_ROLES:
+            continue
+        by_role[role].append(item)
+    if not by_role:
+        return [], ""
+    ranked_roles = sorted(
+        by_role,
+        key=lambda role: (
+            len({paper_key(ev) for ev in by_role[role]}),
+            len(by_role[role]),
+            average([ev.confidence for ev in by_role[role]]),
+        ),
+        reverse=True,
+    )
+    for role in ranked_roles:
+        role_items = by_role[role]
+        if len({paper_key(ev) for ev in role_items}) < 2:
+            continue
+        role_cluster = EvidenceCluster(
+            cluster_id=cluster.cluster_id,
+            dimension=cluster.dimension,
+            dimension_label=cluster.dimension_label,
+            label=cluster.label,
+            summary=cluster.summary,
+            mechanism=cluster.mechanism,
+            bottleneck=cluster.bottleneck,
+            evidence_ids=[ev.evidence_id for ev in sorted(role_items, key=lambda item: item.confidence, reverse=True)],
+            papers=unique_strings([paper_key(ev) for ev in role_items]),
+            evidence_count=len(role_items),
+            independent_paper_count=len({paper_key(ev) for ev in role_items}),
+            average_confidence=round(average([ev.confidence for ev in role_items]), 3),
+        )
+        return select_cluster_support(role_cluster, by_id), role
+    return [], ""
+
+
+def cluster_summary(items: list[Evidence]) -> str:
+    if not items:
+        return ""
+    papers = unique_strings([paper_key(ev) for ev in items])[:3]
+    facts = "；".join(compact_fact(ev.fact, 120) for ev in items[:3])
+    return f"覆盖 {len(items)} 条 Evidence、{len(papers)} 篇代表论文（{'; '.join(papers)}）：{facts}"
+
+
+def cluster_paper_facts(items: list[Evidence]) -> str:
+    by_paper: dict[str, list[Evidence]] = defaultdict(list)
+    for item in items:
+        by_paper[paper_key(item)].append(item)
+    parts: list[str] = []
+    for paper, paper_items in list(by_paper.items())[:4]:
+        best = sorted(paper_items, key=lambda ev: ev.confidence, reverse=True)[0]
+        parts.append(f"{paper}：{compact_fact(best.fact, 120)}")
+    return "；".join(parts)
+
+
+def most_common_nonempty(values: list[str]) -> str:
+    cleaned = [value.strip() for value in values if value and value.strip()]
+    if not cleaned:
+        return ""
+    return Counter(cleaned).most_common(1)[0][0]
+
+
 def paper_key(evidence: Evidence) -> str:
     return (evidence.paper or evidence.source_title or evidence.source_url or evidence.url or "unknown").strip()
 
@@ -1688,6 +2135,8 @@ def claim_backlog_rows(claims: list[Claim], evidence: list[Evidence]) -> list[di
                 "dimension": claim.dimension,
                 "dimension_label": claim.dimension_label,
                 "claim_type": claim.claim_type,
+                "evidence_cluster_id": claim.evidence_cluster_id,
+                "evidence_cluster_label": claim.evidence_cluster_label,
                 "verification_status": claim.verification_status,
                 "risk_level": claim.risk_level,
                 "backlog_reason": claim.backlog_reason or f"red_team_{claim.verification_status}",
@@ -1941,6 +2390,7 @@ def build_observability(
             "matrix_json": "exports/matrix.json",
             "matrix_csv": "exports/matrix.csv",
             "recommendations": "exports/recommendations.json",
+            "evidence_clusters": "exports/evidence_clusters.json",
             "evidence_matrix_csv": "exports/evidence_matrix.csv",
         },
     )
@@ -2050,6 +2500,8 @@ def extract_evidence_from_document(
                     source_title=document.title,
                     source_url=document.url,
                     source_id=document.source_id,
+                    source_subtype=document.source_subtype,
+                    source_subtype_reason=document.source_subtype_reason,
                     confidence=round(confidence, 3),
                     authority_score=round(source_weight(document.source_type) + 0.3, 3),
                     freshness_score=0.75,
@@ -2076,6 +2528,8 @@ def extract_evidence_from_document(
                 source_title=document.title,
                 source_url=document.url,
                 source_id=document.source_id,
+                source_subtype=document.source_subtype,
+                source_subtype_reason=document.source_subtype_reason,
                 confidence=0.45,
                 authority_score=round(source_weight(document.source_type) + 0.3, 3),
                 freshness_score=0.7,

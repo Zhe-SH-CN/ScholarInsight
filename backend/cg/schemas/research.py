@@ -228,6 +228,8 @@ class Evidence(BaseModel):
     reasoning_pattern: str = ""
     bottleneck: str = ""
     mechanism: str = ""
+    source_subtype: str = "unclassified"
+    source_subtype_reason: str = ""
     authority_score: float = Field(default=0.5, ge=0, le=1)
     freshness_score: float = Field(default=0.5, ge=0, le=1)
     relevance_score: float = Field(default=0.5, ge=0, le=1)
@@ -252,6 +254,8 @@ class EvidenceSummary(BaseModel):
     reasoning_pattern: str = ""
     bottleneck: str = ""
     mechanism: str = ""
+    source_subtype: str = "unclassified"
+    source_subtype_reason: str = ""
 
 
 class RedTeamNote(BaseModel):
@@ -282,6 +286,8 @@ class Claim(BaseModel):
     claim_type: str = "descriptive"
     source_paper_count: int = 0
     evidence_support_level: str = "unknown"
+    evidence_cluster_id: str = ""
+    evidence_cluster_label: str = ""
     backlog_reason: str = ""
     verification_status: Literal[
         "draft",
@@ -353,6 +359,24 @@ class EvidenceLink(BaseModel):
     source_url: str
     quote_preview: str
     confidence: float = Field(default=0.5, ge=0, le=1)
+
+
+class EvidenceCluster(BaseModel):
+    cluster_id: str
+    dimension: str
+    dimension_label: str
+    label: str
+    summary: str = ""
+    mechanism: str = ""
+    bottleneck: str = ""
+    evidence_ids: list[str] = Field(default_factory=list)
+    papers: list[str] = Field(default_factory=list)
+    evidence_count: int = 0
+    independent_paper_count: int = 0
+    average_confidence: float = Field(default=0, ge=0, le=1)
+    verified_claim_ids: list[str] = Field(default_factory=list)
+    challenged_claim_ids: list[str] = Field(default_factory=list)
+    status: Literal["verified", "candidate", "single_paper", "backlog"] = "candidate"
 
 
 class PaperProfile(BaseModel):
@@ -472,6 +496,7 @@ class RunDetail(BaseModel):
     recommendations: list[OpportunityRecommendation] = Field(default_factory=list)
     observability: ObservabilitySnapshot | None = None
     evidence_graph: EvidenceGraph | None = None
+    evidence_clusters: list[EvidenceCluster] = Field(default_factory=list)
     report_markdown: str = ""
     executive_summary_markdown: str = ""
     methodology_markdown: str = ""
