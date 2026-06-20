@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from cg.agents.research_agents import deterministic_plan, normalize_claim_dimension, normalize_dimension_key
-from cg.schemas.research import ResearchRequest, TOPIC_FAMILY_DIMENSIONS, dimensions_for_topic
+from cg.orchestrator.pipeline import extract_evidence_from_document
+from cg.schemas.research import ResearchRequest, SourceDocument, TOPIC_FAMILY_DIMENSIONS, dimensions_for_topic
 
 
 def test_research_request_uses_counterfactual_family_dimensions_by_default() -> None:
@@ -110,4 +113,74 @@ def test_normalize_claim_dimension_rejects_meta_claims_across_dimensions() -> No
             valid,
         )
         == "treatment_effect_estimation"
+    )
+
+
+def test_deterministic_evidence_uses_scientific_topic_dimensions() -> None:
+    document = _source_document(
+        "Scientific Benchmark",
+        (
+            "The scientific reasoning benchmark defines multiple scientific problem tasks "
+            "and reports evaluation metrics for hypothesis generation. "
+            "The workflow uses tool-augmented agents for experiment planning and automated discovery."
+        ),
+        source_subtype="scientific_reasoning_benchmark",
+    )
+
+    evidence = extract_evidence_from_document(
+        "run_test",
+        document,
+        dimensions_for_topic("Scientific Reasoning with LLMs"),
+        ["Scientific Reasoning with LLMs"],
+    )
+
+    dimensions = {item.dimension for item in evidence}
+    assert "other" not in dimensions
+    assert "scientific_problem_benchmarking" in dimensions
+    assert "tool_augmented_scientific_reasoning" in dimensions
+
+
+def test_deterministic_evidence_uses_mathematical_topic_dimensions() -> None:
+    document = _source_document(
+        "Math Proof Benchmark",
+        (
+            "The mathematical reasoning benchmark evaluates GSM8K and olympiad word problem tasks. "
+            "The method adds theorem proof verification with a step verifier and search-based self-consistency."
+        ),
+        source_subtype="math_reasoning_benchmark",
+    )
+
+    evidence = extract_evidence_from_document(
+        "run_test",
+        document,
+        dimensions_for_topic("Mathematical Reasoning"),
+        ["Mathematical Reasoning"],
+    )
+
+    dimensions = {item.dimension for item in evidence}
+    assert "other" not in dimensions
+    assert "math_benchmark_evaluation" in dimensions
+    assert "formal_proof_symbolic_reasoning" in dimensions
+
+
+def _source_document(title: str, content: str, source_subtype: str) -> SourceDocument:
+    return SourceDocument(
+        source_id="src_test",
+        run_id="run_test",
+        url=f"/papers/{title.replace(' ', '_')}.pdf",
+        title=title,
+        content=content,
+        excerpt=content[:120],
+        source_type="academic_paper",
+        http_status=200,
+        content_hash="hash",
+        fetched_at=datetime.now(timezone.utc),
+        parser="test",
+        provider="local_papers",
+        query="test query",
+        content_source="test",
+        source_score=0.9,
+        relevance_score=0.9,
+        relevance_label="high",
+        source_subtype=source_subtype,
     )
