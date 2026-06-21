@@ -45,8 +45,8 @@ class Settings(BaseSettings):
     cg_llm_rate_limit_cooldown_seconds: float = Field(default=12.0, ge=1, le=120)
 
     # --- ScholarInsight ---
-    scholar_paper_index_path: str = "data/paper_index.json"
-    scholar_local_papers_dir: str = "/home/zsz/papers/"
+    scholar_paper_index_path: str = "backend/data/paper_index.json"
+    scholar_local_papers_dir: str = ""
     scholar_enable_reranker: bool = True
     scholar_reranker_model: str = "BAAI/bge-reranker-base"
     scholar_reranker_device: str = "auto"

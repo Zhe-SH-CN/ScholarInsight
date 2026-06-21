@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 
 from cg.schemas.research import SourceCandidate
-from cg.settings import Settings
+from cg.settings import REPO_ROOT, Settings
 
 
 QUERY_STOPWORDS = {
@@ -2060,13 +2060,12 @@ class LocalPaperSearchTool:
         index_path = getattr(settings, "scholar_paper_index_path", "paper_index.json")
         p = Path(index_path)
         if not p.is_absolute():
-            # 先尝试直接相对于 data_dir
-            candidate = (settings.data_dir / p.name).resolve()
-            if candidate.exists():
-                p = candidate
-            else:
-                # fallback: data_dir 下的子路径
-                p = (settings.data_dir / index_path).resolve()
+            candidates = [
+                (REPO_ROOT / p).resolve(),
+                (settings.data_dir / p.name).resolve(),
+                (settings.data_dir / index_path).resolve(),
+            ]
+            p = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
         self.index = LocalPaperIndex(str(p), settings=settings)
 
     @property

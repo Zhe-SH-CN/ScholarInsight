@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from cg.settings import Settings
+from cg.tools import local_paper_search
 from cg.tools.local_paper_search import LocalPaperIndex, canonical_paper_title
 
 
@@ -12,6 +15,24 @@ def _index() -> LocalPaperIndex:
     index = LocalPaperIndex.__new__(LocalPaperIndex)
     index.settings = Settings(scholar_source_gate_enabled=True)
     return index
+
+
+def test_local_paper_search_tool_resolves_repo_relative_index_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    class FakeLocalPaperIndex:
+        def __init__(self, path: str, settings: Settings):
+            captured["path"] = path
+
+    monkeypatch.setattr(local_paper_search, "LocalPaperIndex", FakeLocalPaperIndex)
+
+    local_paper_search.LocalPaperSearchTool(
+        Settings(scholar_paper_index_path="backend/data/paper_index.json")
+    )
+
+    assert Path(captured["path"]) == (
+        local_paper_search.REPO_ROOT / "backend/data/paper_index.json"
+    ).resolve()
 
 
 def test_explicit_cuda_reranker_failure_is_not_silent(monkeypatch: pytest.MonkeyPatch) -> None:

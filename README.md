@@ -21,17 +21,17 @@ ScholarInsight uses 15 reasoning-pattern dimensions:
 
 ## Architecture
 
-The system keeps the original frontend/backend shape:
+The system keeps the original frontend/backend shape, but the active quality path is now source-role-aware and falsification-aware:
 
-![ScholarInsight Overall Architecture](scholarinsight-architecture.png)
+![ScholarInsight Quality-Control Architecture](diagrams/scholarinsight_architecture.svg)
 
-![ScholarInsight Agent Workflow Architecture](scholarinsight-agent-workflow.png)
+![ScholarInsight Agent Orchestration](diagrams/scholarinsight_agent_orchestration.svg)
 
 * Frontend: React + Vite workspace for login, research kickoff, event log, artifact inspection, report viewing, and follow-up chat.
 * Backend: FastAPI service for auth, run management, local artifact serving, chat APIs, and agent orchestration.
-* Pipeline: `ResearchPlanningAgent -> SourceResearchAgent -> EvidenceStructuringAgent -> AnalysisAndReviewAgent -> ReportComposerAgent`.
-* Retrieval: `LocalPaperSearchTool` loads the local paper index and embedding matrix, returning `academic_paper` candidates.
-* Storage: every run is stored under `data/runs` as JSON, JSONL, Markdown, and CSV artifacts.
+* Pipeline: planning -> local retrieval and source-role gating -> evidence extraction -> claim gate `g(c)` -> hard-negative audit and certificate `h(c)` -> report rendering.
+* Retrieval: `LocalPaperSearchTool` loads the local paper index and embedding matrix, reranks candidates, and records accepted/rejected source boundaries.
+* Storage: every run is stored under `data/runs` as JSON, JSONL, Markdown, CSV, and report artifacts.
 
 ## Project Structure
 
@@ -94,8 +94,8 @@ Copy `backend/.env.example` to `backend/.env` and configure at least one OpenAI-
 Required local paper paths:
 
 ```env
-SCHOLAR_PAPER_INDEX_PATH=/home/zsz/Mimo/ScholarInsight/backend/data/paper_index.json
-SCHOLAR_LOCAL_PAPERS_DIR=/home/zsz/papers
+SCHOLAR_PAPER_INDEX_PATH=backend/data/paper_index.json
+SCHOLAR_LOCAL_PAPERS_DIR=<local-paper-directory>
 ```
 
 ## Testing

@@ -189,6 +189,20 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     gate = packet.formal_gate_note()
     skeleton = packet.paper_skeleton_note()
     intro = packet.introduction_outline_note()
+    method = packet.method_section_draft_note()
+    experiments = packet.experiment_section_draft_note()
+    rendered = packet.render_markdown(
+        {
+            "fresh_pilot": [],
+            "structural_ablation_summary": [],
+            "runtime_ablation_summary": [],
+            "formal_gate": gate,
+            "paper_skeleton": skeleton,
+            "introduction_outline": intro,
+            "method_section_draft": method,
+            "experiment_section_draft": experiments,
+        }
+    )
 
     assert structural == [
         {"variant": "minus_gate", "mean_delta": -0.175, "min_delta": -0.2, "max_delta": -0.15, "topic_count": 2}
@@ -203,3 +217,11 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     assert intro["type_positioning"]["type"] == "New Problem/Setting Paper"
     assert intro["flowchart_consistency"]["running_example_loop"] == "pass"
     assert len(intro["paragraphs"][-1]["contributions"]) == 4
+    assert method["section"] == "Section 3 Method"
+    assert "3.1 Source-role retrieval" in method["subsections"][0]["title"]
+    assert "not a truth, novelty, or publishability guarantee" in method["bounded_proposition"]["boundary"]
+    assert experiments["section"] == "Section 4 Experiments"
+    assert "five topic families" in experiments["subsections"][0]["claim"]
+    assert "Method Section Draft" in rendered
+    assert "Experiment Section Draft" in rendered
+    assert "automatically generates AAAI-quality ideas" not in rendered
