@@ -165,3 +165,34 @@ def test_runtime_ablation_table_reads_baseline_and_renders(tmp_path: Path) -> No
     assert rows[0]["topic_id"] == "004"
     assert "Runtime Ablation Table" in rendered
     assert "RAG with Knowledge Graphs" in rendered
+
+
+def test_paper_experiment_packet_summarizes_deltas() -> None:
+    packet = _script_module("paper_experiment_packet")
+
+    structural = packet.structural_delta_summary(
+        [
+            {"topic_id": "004", "variant": "full", "overall_score": 1.0},
+            {"topic_id": "004", "variant": "minus_gate", "overall_score": 0.8},
+            {"topic_id": "006", "variant": "full", "overall_score": 0.9},
+            {"topic_id": "006", "variant": "minus_gate", "overall_score": 0.75},
+        ]
+    )
+    runtime = packet.runtime_delta_summary(
+        [
+            {"topic_id": "004", "variant": "full", "overall_score": 1.0, "report_ready_count": 4},
+            {"topic_id": "004", "variant": "no_reranker", "score_delta_vs_full": -0.1, "report_ready_count": 2, "quality_flags": [], "evaluator_flags": []},
+            {"topic_id": "006", "variant": "full", "overall_score": 0.9, "report_ready_count": 3},
+            {"topic_id": "006", "variant": "no_reranker", "score_delta_vs_full": -0.2, "report_ready_count": 2, "quality_flags": ["source_drift"], "evaluator_flags": []},
+        ]
+    )
+    gate = packet.formal_gate_note()
+
+    assert structural == [
+        {"variant": "minus_gate", "mean_delta": -0.175, "min_delta": -0.2, "max_delta": -0.15, "topic_count": 2}
+    ]
+    assert runtime[0]["variant"] == "no_reranker"
+    assert runtime[0]["mean_score_delta"] == -0.15
+    assert runtime[0]["mean_report_ready_delta"] == -1.5
+    assert "source_drift" in runtime[0]["flags"]
+    assert "not a guarantee" in " ".join(gate["guarantee"])
