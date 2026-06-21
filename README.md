@@ -33,6 +33,10 @@ The system keeps the original frontend/backend shape, but the active quality pat
 * Retrieval: `LocalPaperSearchTool` loads the local paper index and embedding matrix, reranks candidates, and records accepted/rejected source boundaries.
 * Storage: every run is stored under `data/runs` as JSON, JSONL, Markdown, CSV, and report artifacts.
 
+## Current Handoff
+
+For the current research status and restart path, read `docs/project_handoff_2026-06-21.md`. For the paper-index embedding granularity and MinerU/chunk-index recommendation, read `docs/embedding_granularity_mineru_plan.md`.
+
 ## Project Structure
 
 ```text

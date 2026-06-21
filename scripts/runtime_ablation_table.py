@@ -68,6 +68,14 @@ def read_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def parse_labeled_path(value: str) -> tuple[str, Path]:
+    if "=" not in value:
+        path = Path(value)
+        return path.name, path
+    label, raw_path = value.split("=", 1)
+    return label.strip(), Path(raw_path.strip())
+
+
 def summarize_artifact(path: Path, variant: str, full_scores: dict[str, float]) -> dict[str, Any]:
     summary = read_json(path / "summary.json")
     evaluation = load_artifact_dir(path, f"{path.name}::{variant}")
@@ -221,6 +229,12 @@ async def main() -> None:
     parser.add_argument("--claim-limit", type=int, default=24)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--allow-hf-network", action="store_true")
+    parser.add_argument(
+        "--existing-variant",
+        action="append",
+        default=[],
+        help="label=path to an existing variant root; summarize without rerunning retrieval.",
+    )
     args = parser.parse_args()
 
     if not args.allow_hf_network:
@@ -243,7 +257,13 @@ async def main() -> None:
 
     rows = baseline_rows(baseline_root)
     full_scores = {row["topic_id"]: row["overall_score"] for row in rows if row["variant"] == "full"}
+    for item in args.existing_variant:
+        variant, variant_root = parse_labeled_path(item)
+        for path in topic_dirs(variant_root):
+            rows.append(summarize_artifact(path, variant, full_scores))
     for variant in variants:
+        if any(variant == parse_labeled_path(item)[0] for item in args.existing_variant):
+            continue
         variant_root = await run_variant(
             variant=variant,
             topic_ids=topic_ids,

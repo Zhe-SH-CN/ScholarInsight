@@ -34,6 +34,14 @@ def _topic_name(row: dict[str, Any]) -> str:
 def _fresh_stats(packet: dict[str, Any]) -> dict[str, Any]:
     rows = packet.get("fresh_pilot") or []
     scores = [float(row.get("score") or 0) for row in rows]
+    warning_rows = [
+        row for row in rows
+        if row.get("warnings")
+    ]
+    generic_warning_rows = [
+        row for row in rows
+        if any("generic_synthesis_claims_need_advisor_review" in str(flag) for flag in row.get("warnings") or [])
+    ]
     return {
         "topic_count": len(rows),
         "pass_count": sum(1 for row in rows if row.get("passed")),
@@ -41,21 +49,24 @@ def _fresh_stats(packet: dict[str, Any]) -> dict[str, Any]:
         "score_max": max(scores) if scores else 0,
         "report_ready_total": sum(int(row.get("report_ready_count") or 0) for row in rows),
         "falsification_total": sum(int(row.get("falsification_plan_count") or 0) for row in rows),
+        "warning_count": len(warning_rows),
+        "generic_warning_count": len(generic_warning_rows),
         "topics": ", ".join(_topic_name(row) for row in rows),
     }
 
 
 def _fresh_table(rows: list[dict[str, Any]]) -> list[str]:
     lines = [
-        "| Topic | Score | Accepted | Evidence | Claims | Report-ready | Falsification plans | Device |",
-        "|---|---:|---:|---:|---:|---:|---:|---|",
+        "| Topic | Score | Accepted | Evidence | Claims | Report-ready | Falsification plans | Device | Warnings |",
+        "|---|---:|---:|---:|---:|---:|---:|---|---|",
     ]
     for row in rows:
+        warnings = ", ".join(row.get("warnings") or []) or "none"
         lines.append(
             f"| {_topic_name(row)} | {_fmt(row.get('score'))} | {row.get('accepted_count', 0)} "
             f"| {row.get('evidence_count', 0)} | {row.get('claim_count', 0)} "
             f"| {row.get('report_ready_count', 0)} | {row.get('falsification_plan_count', 0)} "
-            f"| {row.get('reranker_device', '')} |"
+            f"| {row.get('reranker_device', '')} | {warnings} |"
         )
     return lines
 
@@ -131,7 +142,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "",
         "## Abstract",
         "",
-        f"LLM-assisted research ideation can produce fluent reports that appear useful while mixing in-scope papers, adjacent papers, and unsupported synthesis. This is risky when the output is used to allocate advisor time or experimental effort. We introduce ScholarInsight, a literature-grounded ideation pipeline that treats source relevance, claim generation, and falsifiability as linked audit problems. The pipeline builds a source-role-aware evidence pool, admits report-body claims only through a formal gate g(c), and issues a report certificate h(c) only when the claim also has counterexample coverage and a falsification plan. In a fresh local pilot over {fresh['topic_count']} AI/ML topic families ({fresh['topics']}), all {fresh['pass_count']} artifacts passed freeze validation, with idea-quality scores from {_fmt(fresh['score_min'])} to {_fmt(fresh['score_max'])}, {fresh['report_ready_total']} report-ready claims, and {fresh['falsification_total']} falsification plans. Structural ablation produced the largest mean drop when the claim gate was removed ({_fmt(claim_gate.get('mean_delta'))}), followed by hard-negative audit ({_fmt(hard_negative.get('mean_delta'))}) and falsification ({_fmt(falsification.get('mean_delta'))}). Runtime source-stage ablation showed that removing the reranker reduced report-ready synthesis in selected topics, while removing the source gate caused missing counterexample-audit flags. These results support ScholarInsight as an auditable and falsifiable ideation scaffold. They do not establish novelty, feasibility, or publishability.",
+        f"LLM-assisted research ideation can produce fluent reports that appear useful while mixing in-scope papers, adjacent papers, and unsupported synthesis. This is risky when the output is used to allocate advisor time or experimental effort. We introduce ScholarInsight, a literature-grounded ideation pipeline that treats source relevance, claim generation, and falsifiability as linked audit problems. The pipeline builds a source-role-aware evidence pool, admits report-body claims only through a formal gate g(c), and issues a report certificate h(c) only when the claim also has counterexample coverage and a falsification plan. In a fresh local pilot over {fresh['topic_count']} AI/ML topic families ({fresh['topics']}), all {fresh['pass_count']} artifacts passed freeze validation, with conservative idea-quality scores from {_fmt(fresh['score_min'])} to {_fmt(fresh['score_max'])}, {fresh['report_ready_total']} report-ready claims, and {fresh['falsification_total']} falsification plans. The updated evaluator flags {fresh['generic_warning_count']} of {fresh['topic_count']} pilot topics for generic synthesis claims that require advisor novelty review. Structural ablation produced the largest mean drop when hard-negative audit was removed ({_fmt(hard_negative.get('mean_delta'))}), followed by the claim gate ({_fmt(claim_gate.get('mean_delta'))}) and falsification ({_fmt(falsification.get('mean_delta'))}). Runtime source-stage ablation showed that removing the reranker reduced report-ready synthesis in selected topics, while removing the source gate caused missing counterexample-audit flags. These results support ScholarInsight as an auditable and falsifiable ideation scaffold. They do not establish novelty, feasibility, or publishability.",
         "",
         "## 1 Introduction",
         "",
@@ -213,7 +224,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "",
             "### 4.2 Fresh Pilot Freeze Validation",
             "",
-            f"All {fresh['pass_count']} of {fresh['topic_count']} fresh pilot artifacts passed freeze validation. The score range was {_fmt(fresh['score_min'])} to {_fmt(fresh['score_max'])}. The artifacts contained {fresh['report_ready_total']} report-ready claims and {fresh['falsification_total']} falsification plans. This supports the claim that the current pipeline can produce advisor-reviewable artifacts on the tested topic families.",
+            f"All {fresh['pass_count']} of {fresh['topic_count']} fresh pilot artifacts passed freeze validation. The conservative score range was {_fmt(fresh['score_min'])} to {_fmt(fresh['score_max'])}. The artifacts contained {fresh['report_ready_total']} report-ready claims and {fresh['falsification_total']} falsification plans. All {fresh['generic_warning_count']} pilot topics with warnings were flagged for generic synthesis claims that require advisor novelty/usefulness review. This supports the narrower claim that the current pipeline can produce auditable advisor-review artifacts on the tested topic families.",
             "",
             "### 4.3 Structural Ablation",
             "",
@@ -221,7 +232,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "",
             *(_delta_table(structural)),
             "",
-            "The largest mean delta came from removing the claim gate. This is consistent with the design premise that report-body eligibility, not raw claim count, is the central quality control.",
+            "The largest mean delta came from removing hard-negative audit under the conservative evaluator, with claim-gate removal close behind. This is consistent with the design premise that both report-body eligibility and boundary-challenge evidence are central quality controls.",
             "",
             "### 4.4 Runtime Source-Stage Ablation",
             "",
@@ -241,7 +252,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "",
             "The ablations suggest that several controls are doing real work. The claim gate produces the largest structural drop when removed, source roles help keep retrieval evidence aligned with the target topic, and the source gate preserves rejected material needed for hard-negative audit. These results support the method's internal logic, but they remain a pilot-scale evaluation.",
             "",
-            "The main alternative explanation is that the evaluator rewards artifacts that resemble the pipeline's own structure. This risk is real. The current evidence should therefore be interpreted as artifact auditability evidence, not as a final usefulness evaluation. A stronger paper needs blind expert or strong-model review of the generated research directions and, after advisor approval, broader topic coverage.",
+            "The main alternative explanation is that the evaluator rewards artifacts that resemble the pipeline's own structure. This risk is real. The conservative evaluator now explicitly flags generic evidence-axis synthesis claims, so the current evidence should be interpreted as artifact auditability evidence, not as a final usefulness evaluation. A stronger paper needs blind expert or strong-model review of the generated research directions and, after advisor approval, broader topic coverage.",
             "",
             "The current system also depends on local index quality, source-role classifiers, and reranker behavior. A topic with sparse or noisy literature may pass fewer claims through g(c), which is preferable to overclaiming but may reduce report richness. This boundary should be presented as a design choice, not as a failure to be hidden.",
             "",

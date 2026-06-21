@@ -54,6 +54,7 @@ PROTOCOL = {
         "comparative or cross-role report-ready claims are present",
         "multiple source roles/dimensions support the synthesis",
         "hard negatives define a nontrivial boundary, not just positive support",
+        "generic evidence-axis synthesis claims are penalized unless reviewed by an advisor",
         "problem/method/boundary framing is explicit; literature novelty remains human-audited",
     ],
 }
@@ -66,6 +67,15 @@ BAD_REFERENCE_PATTERNS = [
     re.compile(r"published as a conference paper", re.IGNORECASE),
     re.compile(r"^abstract$", re.IGNORECASE),
     re.compile(r"^references$", re.IGNORECASE),
+]
+
+
+GENERIC_SYNTHESIS_PATTERNS = [
+    re.compile(r"共同围绕[“\"].+?[”\"]这一分析轴组织证据"),
+    re.compile(r"该结论限定于"),
+    re.compile(r"可作为报告主体中的范围限定综合结论"),
+    re.compile(r"mainly reflects|primarily reflects", re.IGNORECASE),
+    re.compile(r"scoped comparative claim", re.IGNORECASE),
 ]
 
 
@@ -330,6 +340,14 @@ def collect_metrics(
     structured_benchmark = any(row.get("benchmark_or_task_perturbation") for row in falsification)
     structured_formal_gate = any(row.get("evidence_certificate") for row in falsification)
     structured_negative_logging = any(row.get("negative_result_logging_schema") for row in falsification)
+    generic_synthesis_claims = [claim for claim in claims if is_generic_synthesis_claim(claim)]
+    generic_report_ready_like_claims = [
+        claim for claim in generic_synthesis_claims
+        if claim.get("claim_type") in {"comparative", "cross_role_contrast"}
+        and claim.get("verification_status") == "verified"
+        and claim.get("risk_level", "medium") != "high"
+        and int(claim.get("source_paper_count") or 0) >= 2
+    ]
     return {
         "claim_count": claim_count,
         "verified_claim_count": len(verified),
@@ -373,6 +391,8 @@ def collect_metrics(
             [claim for claim in claims if claim.get("claim_type") in {"comparative", "cross_role_contrast"}]
         ),
         "cross_role_claim_count": len([claim for claim in claims if claim.get("claim_type") == "cross_role_contrast"]),
+        "generic_synthesis_claim_count": len(generic_synthesis_claims),
+        "generic_report_ready_like_claim_count": len(generic_report_ready_like_claims),
         "recommendation_next_step_count": next_steps,
         "has_formal_gate_text": structured_formal_gate or contains_any(report_body_text, ["g(c)", "evidence_certificate", "形式化证据门控"]),
         "has_falsification_text": bool(falsification) or contains_any(report_body_text, ["falsification", "可证伪", "推翻条件", "scope_narrowing"]),
@@ -382,6 +402,21 @@ def collect_metrics(
         "has_backlog_separation_text": contains_any(report_body_text, ["待验证观察", "backlog", "audit-only", "暂不进入主结论"]),
         "has_problem_boundary_text": contains_any(report_body_text, ["问题定义", "边界条件", "scope", "贡献边界"]),
     }
+
+
+def claim_text(claim: dict[str, Any]) -> str:
+    return " ".join(
+        str(claim.get(key) or "")
+        for key in ["final_wording", "claim", "reasoning_summary"]
+    )
+
+
+def is_generic_synthesis_claim(claim: dict[str, Any]) -> bool:
+    text = claim_text(claim)
+    if not text.strip():
+        return False
+    matches = sum(1 for pattern in GENERIC_SYNTHESIS_PATTERNS if pattern.search(text))
+    return matches >= 2
 
 
 def contains_any(text: str, needles: list[str]) -> bool:
@@ -446,6 +481,10 @@ def score_metrics(metrics: dict[str, Any]) -> dict[str, float]:
     novelty_proxy += 0.25 * min(1.0, metrics["source_role_count"] / 2)
     novelty_proxy += 0.25 if metrics["hard_negative_count"] > 0 else 0.0
     novelty_proxy += 0.20 if metrics["has_problem_boundary_text"] else 0.0
+    novelty_proxy -= 0.30 * ratio(
+        metrics["generic_report_ready_like_claim_count"],
+        max(1, metrics["report_ready_claim_count"] or metrics["comparative_claim_count"]),
+    )
 
     return {
         "source_relevance": clamp(source_relevance),
@@ -488,6 +527,8 @@ def flags_for(metrics: dict[str, Any], scores: dict[str, float]) -> list[str]:
         flags.append("no_report_ready_claims")
     if metrics["high_risk_claim_count"] > metrics["low_risk_verified_claim_count"]:
         flags.append("high_risk_claims_dominate")
+    if metrics["generic_report_ready_like_claim_count"] > 0:
+        flags.append("generic_synthesis_claims_need_advisor_review")
     return sorted(set(flags))
 
 
@@ -499,6 +540,7 @@ def verdict(score: float, flags: list[str] | None = None) -> str:
         "high_risk_claims_dominate",
         "mechanical_appendix_fact_prefix",
         "appendix_heavy_citation_dependency",
+        "generic_synthesis_claims_need_advisor_review",
     }
     has_hard_revision_flag = bool(hard_revision_flags & set(flags))
     if score >= 0.75:

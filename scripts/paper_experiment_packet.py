@@ -587,8 +587,9 @@ def experiment_section_draft_note() -> dict[str, Any]:
                     "falsification coverage for all five pilot topics."
                 ),
                 "evidence": (
-                    "The fresh pilot scores were 0.986, 0.933, 0.969, 0.986, and 0.970. Report-ready counts were 4, 3, 1, 4, "
-                    "and 2, and falsification coverage was complete for each topic's report-ready claims."
+                    "The fresh pilot table records per-topic evaluator scores, report-ready counts, and falsification "
+                    "coverage. The conservative evaluator may flag generic synthesis claims for advisor novelty review "
+                    "even when the freeze validator passes."
                 ),
             },
             {
@@ -598,9 +599,9 @@ def experiment_section_draft_note() -> dict[str, Any]:
                     "or source-role fields reduced the structural quality proxy."
                 ),
                 "evidence": (
-                    "The artifact-masked ablation produced the largest mean drop for minus_claim_gate (-0.165), followed by "
-                    "minus_hard_negative (-0.125), minus_falsification (-0.092), minus_source_roles (-0.083), and "
-                    "minus_experiment_framing (-0.041)."
+                    "The artifact-masked ablation table reports mean deltas for claim gate, hard-negative audit, "
+                    "falsification, source-role, and experiment-framing variants. These deltas should be interpreted "
+                    "as structural proxy evidence, not as a full runtime rerun."
                 ),
             },
             {

@@ -19,7 +19,7 @@ In LLM-assisted literature ideation, ScholarInsight constrains early research di
 
 ## Abstract
 
-LLM-assisted research ideation can produce fluent reports that appear useful while mixing in-scope papers, adjacent papers, and unsupported synthesis. This is risky when the output is used to allocate advisor time or experimental effort. We introduce ScholarInsight, a literature-grounded ideation pipeline that treats source relevance, claim generation, and falsifiability as linked audit problems. The pipeline builds a source-role-aware evidence pool, admits report-body claims only through a formal gate g(c), and issues a report certificate h(c) only when the claim also has counterexample coverage and a falsification plan. In a fresh local pilot over 5 AI/ML topic families (004 RAG with Knowledge Graphs, 006 Mathematical Reasoning, 010 Causal Reasoning with LLMs, 011 Counterfactual Inference, 012 Multi-hop Reasoning on Graphs), all 5 artifacts passed freeze validation, with idea-quality scores from 0.933 to 0.986, 14 report-ready claims, and 14 falsification plans. Structural ablation produced the largest mean drop when the claim gate was removed (-0.165), followed by hard-negative audit (-0.125) and falsification (-0.092). Runtime source-stage ablation showed that removing the reranker reduced report-ready synthesis in selected topics, while removing the source gate caused missing counterexample-audit flags. These results support ScholarInsight as an auditable and falsifiable ideation scaffold. They do not establish novelty, feasibility, or publishability.
+LLM-assisted research ideation can produce fluent reports that appear useful while mixing in-scope papers, adjacent papers, and unsupported synthesis. This is risky when the output is used to allocate advisor time or experimental effort. We introduce ScholarInsight, a literature-grounded ideation pipeline that treats source relevance, claim generation, and falsifiability as linked audit problems. The pipeline builds a source-role-aware evidence pool, admits report-body claims only through a formal gate g(c), and issues a report certificate h(c) only when the claim also has counterexample coverage and a falsification plan. In a fresh local pilot over 5 AI/ML topic families (004 RAG with Knowledge Graphs, 006 Mathematical Reasoning, 010 Causal Reasoning with LLMs, 011 Counterfactual Inference, 012 Multi-hop Reasoning on Graphs), all 5 artifacts passed freeze validation, with conservative idea-quality scores from 0.883 to 0.936, 14 report-ready claims, and 14 falsification plans. The updated evaluator flags 5 of 5 pilot topics for generic synthesis claims that require advisor novelty review. Structural ablation produced the largest mean drop when hard-negative audit was removed (-0.125), followed by the claim gate (-0.115) and falsification (-0.091). Runtime source-stage ablation showed that removing the reranker reduced report-ready synthesis in selected topics, while removing the source gate caused missing counterexample-audit flags. These results support ScholarInsight as an auditable and falsifiable ideation scaffold. They do not establish novelty, feasibility, or publishability.
 
 ## 1 Introduction
 
@@ -111,17 +111,17 @@ The pilot experiments tested whether ScholarInsight's quality controls produced 
 
 The pilot covered 004 RAG with Knowledge Graphs, 006 Mathematical Reasoning, 010 Causal Reasoning with LLMs, 011 Counterfactual Inference, 012 Multi-hop Reasoning on Graphs. All fresh pilots used the deterministic local pipeline, local paper artifacts, direct Hugging Face model loading, and CUDA bge-reranker provenance. No external LLM calls were used for the frozen pilot artifacts. The metrics were idea-quality score, report-ready claim count, falsification-plan coverage, validator pass/fail status, quality flags and evaluator flags, source-purity and counterexample-audit availability.
 
-| Topic | Score | Accepted | Evidence | Claims | Report-ready | Falsification plans | Device |
-|---|---:|---:|---:|---:|---:|---:|---|
-| 004 RAG with Knowledge Graphs | 0.986 | 12 | 46 | 6 | 4 | 4 | cuda |
-| 006 Mathematical Reasoning | 0.933 | 25 | 49 | 7 | 3 | 3 | cuda |
-| 010 Causal Reasoning with LLMs | 0.969 | 9 | 29 | 4 | 1 | 1 | cuda |
-| 011 Counterfactual Inference | 0.986 | 28 | 31 | 6 | 4 | 4 | cuda |
-| 012 Multi-hop Reasoning on Graphs | 0.970 | 18 | 37 | 7 | 2 | 2 | cuda |
+| Topic | Score | Accepted | Evidence | Claims | Report-ready | Falsification plans | Device | Warnings |
+|---|---:|---:|---:|---:|---:|---:|---|---|
+| 004 RAG with Knowledge Graphs | 0.936 | 12 | 46 | 6 | 4 | 4 | cuda | evaluator_flag:generic_synthesis_claims_need_advisor_review |
+| 006 Mathematical Reasoning | 0.883 | 25 | 49 | 7 | 3 | 3 | cuda | evaluator_flag:generic_synthesis_claims_need_advisor_review |
+| 010 Causal Reasoning with LLMs | 0.919 | 9 | 29 | 4 | 1 | 1 | cuda | evaluator_flag:generic_synthesis_claims_need_advisor_review |
+| 011 Counterfactual Inference | 0.936 | 28 | 31 | 6 | 4 | 4 | cuda | evaluator_flag:generic_synthesis_claims_need_advisor_review |
+| 012 Multi-hop Reasoning on Graphs | 0.920 | 18 | 37 | 7 | 2 | 2 | cuda | evaluator_flag:generic_synthesis_claims_need_advisor_review |
 
 ### 4.2 Fresh Pilot Freeze Validation
 
-All 5 of 5 fresh pilot artifacts passed freeze validation. The score range was 0.933 to 0.986. The artifacts contained 14 report-ready claims and 14 falsification plans. This supports the claim that the current pipeline can produce advisor-reviewable artifacts on the tested topic families.
+All 5 of 5 fresh pilot artifacts passed freeze validation. The conservative score range was 0.883 to 0.936. The artifacts contained 14 report-ready claims and 14 falsification plans. All 5 pilot topics with warnings were flagged for generic synthesis claims that require advisor novelty/usefulness review. This supports the narrower claim that the current pipeline can produce auditable advisor-review artifacts on the tested topic families.
 
 ### 4.3 Structural Ablation
 
@@ -129,13 +129,13 @@ The structural ablation masks artifact fields from the same frozen reports. It i
 
 | Variant | Mean delta | Min delta | Max delta | Topics |
 |---|---:|---:|---:|---:|
-| minus_claim_gate | -0.165 | -0.186 | -0.132 | 5 |
-| minus_experiment_framing | -0.041 | -0.042 | -0.041 | 5 |
-| minus_falsification | -0.092 | -0.092 | -0.091 | 5 |
+| minus_claim_gate | -0.115 | -0.136 | -0.082 | 5 |
+| minus_experiment_framing | -0.042 | -0.042 | -0.042 | 5 |
+| minus_falsification | -0.091 | -0.092 | -0.091 | 5 |
 | minus_hard_negative | -0.125 | -0.125 | -0.125 | 5 |
-| minus_source_roles | -0.083 | -0.084 | -0.083 | 5 |
+| minus_source_roles | -0.083 | -0.083 | -0.083 | 5 |
 
-The largest mean delta came from removing the claim gate. This is consistent with the design premise that report-body eligibility, not raw claim count, is the central quality control.
+The largest mean delta came from removing hard-negative audit under the conservative evaluator, with claim-gate removal close behind. This is consistent with the design premise that both report-body eligibility and boundary-challenge evidence are central quality controls.
 
 ### 4.4 Runtime Source-Stage Ablation
 
@@ -143,9 +143,9 @@ The runtime ablation reran deterministic retrieval and source-stage variants wit
 
 | Variant | Mean score delta | Mean report-ready delta | Flags |
 |---|---:|---:|---|
-| no_reranker | -0.011 | -0.400 | accepted_sources_include_non_reportable_roles |
-| no_reranker_no_source_gate | -0.093 | -0.400 | accepted_sources_include_non_reportable_roles, missing_counterexample_audit |
-| no_source_gate | -0.100 | 0 | missing_counterexample_audit |
+| no_reranker | -0.011 | -0.400 | accepted_sources_include_non_reportable_roles, generic_synthesis_claims_need_advisor_review |
+| no_reranker_no_source_gate | -0.093 | -0.400 | accepted_sources_include_non_reportable_roles, generic_synthesis_claims_need_advisor_review, low_novelty_proxy, missing_counterexample_audit |
+| no_source_gate | -0.100 | 0 | generic_synthesis_claims_need_advisor_review, low_novelty_proxy, missing_counterexample_audit |
 
 Removing the reranker produced a mean score delta of -0.011 and a mean report-ready delta of -0.400. Removing the source gate produced a mean score delta of -0.100 and surfaced counterexample-audit failures in the tested artifacts. The 010 topic remained stable under these source-stage ablations, which suggests that source-stage stress tests should be complemented by human or strong-model novelty review.
 
@@ -164,7 +164,7 @@ The central advance is a shift from idea generation to auditable ideation. Schol
 
 The ablations suggest that several controls are doing real work. The claim gate produces the largest structural drop when removed, source roles help keep retrieval evidence aligned with the target topic, and the source gate preserves rejected material needed for hard-negative audit. These results support the method's internal logic, but they remain a pilot-scale evaluation.
 
-The main alternative explanation is that the evaluator rewards artifacts that resemble the pipeline's own structure. This risk is real. The current evidence should therefore be interpreted as artifact auditability evidence, not as a final usefulness evaluation. A stronger paper needs blind expert or strong-model review of the generated research directions and, after advisor approval, broader topic coverage.
+The main alternative explanation is that the evaluator rewards artifacts that resemble the pipeline's own structure. This risk is real. The conservative evaluator now explicitly flags generic evidence-axis synthesis claims, so the current evidence should be interpreted as artifact auditability evidence, not as a final usefulness evaluation. A stronger paper needs blind expert or strong-model review of the generated research directions and, after advisor approval, broader topic coverage.
 
 The current system also depends on local index quality, source-role classifiers, and reranker behavior. A topic with sparse or noisy literature may pass fewer claims through g(c), which is preferable to overclaiming but may reduce report richness. This boundary should be presented as a design choice, not as a failure to be hidden.
 

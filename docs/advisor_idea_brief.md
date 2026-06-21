@@ -104,26 +104,28 @@ workflow 细节图作为 backup：
 
 当前 fresh pilot 覆盖 5 个 topic family：
 
-| Topic | Score | Report-ready claims | Falsification plans | Status |
-|---|---:|---:|---:|---|
-| 004 RAG with Knowledge Graphs | 0.986 | 4 | 4 | pass |
-| 006 Mathematical Reasoning | 0.933 | 3 | 3 | pass |
-| 010 Causal Reasoning with LLMs | 0.969 | 1 | 1 | pass |
-| 011 Counterfactual Inference | 0.986 | 4 | 4 | pass |
-| 012 Multi-hop Reasoning on Graphs | 0.970 | 2 | 2 | pass |
+| Topic | Conservative score | Report-ready claims | Falsification plans | Status | Warning |
+|---|---:|---:|---:|---|---|
+| 004 RAG with Knowledge Graphs | 0.936 | 4 | 4 | pass | generic synthesis needs advisor review |
+| 006 Mathematical Reasoning | 0.883 | 3 | 3 | pass | generic synthesis needs advisor review |
+| 010 Causal Reasoning with LLMs | 0.919 | 1 | 1 | pass | generic synthesis needs advisor review |
+| 011 Counterfactual Inference | 0.936 | 4 | 4 | pass | generic synthesis needs advisor review |
+| 012 Multi-hop Reasoning on Graphs | 0.920 | 2 | 2 | pass | generic synthesis needs advisor review |
 
 合计：
 
 - 5/5 fresh artifacts pass。
 - 14 条 report-ready claims。
 - 14/14 report-ready claims 有 falsification plan。
+- 5/5 topics 被保守 evaluator 标记为 generic synthesis claims needing advisor review。
 - reranker device: CUDA。
 - external LLM calls: false。
 
 解释：
 
 - 这不是 full 132-topic 泛化证明。
-- 但它说明当前 pipeline 在 5 个不同 topic family 上不是只对 RAG+KG 单点过拟合。
+- 它说明当前 pipeline 在 5 个不同 topic family 上可以稳定产出可审计、可证伪的导师评审 artifact。
+- 但 report-ready claim 仍偏“证据轴综述”，不能直接等同于 novel/useful research idea；导师需要判断这些 claim 是有研究价值，还是只是 generic survey observation。
 
 ### Structural ablation
 
@@ -131,16 +133,17 @@ workflow 细节图作为 backup：
 
 | Removed component | Mean score delta |
 |---|---:|
-| claim gate | -0.165 |
 | hard-negative audit | -0.125 |
+| claim gate | -0.115 |
 | falsification plan | -0.092 |
 | source roles | -0.083 |
 | experiment framing | -0.041 |
 
 解释：
 
-- 最大下降来自 claim gate，说明“哪些 claim 可以进入报告主体”是核心。
-- hard-negative 和 falsification 也有明显贡献，说明它们不是装饰性模块。
+- 在保守 evaluator 下，最大下降来自 hard-negative audit，claim gate 仍紧随其后。
+- 这说明“哪些 claim 可以进入报告主体”和“这个 claim 的边界/反例是什么”同样是核心。
+- falsification 也有明显贡献，说明它不是装饰性模块。
 - source role 有独立贡献，支持“source relevance 不是普通 top-k retrieval 能解决”的判断。
 
 ### Runtime source-stage ablation

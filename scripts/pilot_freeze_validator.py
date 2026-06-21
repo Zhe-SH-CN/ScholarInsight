@@ -229,6 +229,12 @@ def mentor_packet(path: Path, validation: dict[str, Any]) -> str:
         f"- Evidence / claims / report-ready claims: {summary.get('evidence_count')} / {summary.get('claim_count')} / {validation['summary']['report_ready_count']}",
         f"- Falsification coverage: {summary.get('falsification_covered_report_ready_claim_count')}/{summary.get('report_ready_count')}",
         "",
+        "## Advisor Review Readiness",
+        "",
+        "- Freeze PASS means the artifact is auditable and falsification-aware; it is not a novelty, usefulness, or publishability guarantee.",
+        f"- Generic synthesis claims needing advisor novelty review: {validation['evaluation']['metrics'].get('generic_report_ready_like_claim_count', 0)}",
+        "- Required human decision: whether each report-ready claim is a useful research direction, a generic survey observation, off-topic, or not novel enough.",
+        "",
         "## Report-ready Claims",
         "",
     ]

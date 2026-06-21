@@ -141,6 +141,8 @@ def test_pilot_freeze_validator_accepts_fresh_artifact_and_builds_packet(tmp_pat
     assert result["passed"]
     assert result["summary"]["report_ready_count"] == 1
     assert "Mentor Review Packet" in packet
+    assert "Advisor Review Readiness" in packet
+    assert "not a novelty, usefulness, or publishability guarantee" in packet
     assert "Human Review Form" in packet
 
 
