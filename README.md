@@ -23,9 +23,9 @@ ScholarInsight uses 15 reasoning-pattern dimensions:
 
 The system keeps the original frontend/backend shape, but the active quality path is now source-role-aware and falsification-aware:
 
-![ScholarInsight Quality-Control Architecture](diagrams/scholarinsight_architecture.svg)
+![ScholarInsight Quality-Control Architecture](diagrams/scholarinsight-architecture.png)
 
-![ScholarInsight Agent Orchestration](diagrams/scholarinsight_agent_orchestration.svg)
+![ScholarInsight Agent Orchestration](diagrams/scholarinsight-agent-workflow.png)
 
 * Frontend: React + Vite workspace for login, research kickoff, event log, artifact inspection, report viewing, and follow-up chat.
 * Backend: FastAPI service for auth, run management, local artifact serving, chat APIs, and agent orchestration.
