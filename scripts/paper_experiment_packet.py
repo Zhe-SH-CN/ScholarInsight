@@ -134,6 +134,157 @@ def formal_gate_note() -> dict[str, Any]:
     }
 
 
+def paper_skeleton_note() -> dict[str, Any]:
+    return {
+        "paper_type": "New Problem/Setting paper with a technique contribution",
+        "positioning_rationale": (
+            "The paper should introduce auditable, falsifiable literature-grounded research ideation "
+            "as the setting, then present ScholarInsight as the mechanism that makes the setting operational."
+        ),
+        "thinking_template": [
+            {
+                "stage": "Research background",
+                "content": (
+                    "LLM-assisted research ideation is increasingly used to scan literature, propose research questions, "
+                    "and draft early-stage reports. The high-stakes use case is not answer generation, but deciding which "
+                    "research directions deserve human attention, experiments, and advisor time."
+                ),
+            },
+            {
+                "stage": "Limitation 1",
+                "content": (
+                    "Generic LLM/RAG workflows can produce fluent research claims while drifting to adjacent papers; "
+                    "they rarely expose why each source is relevant or why rejected sources should not support a conclusion."
+                ),
+            },
+            {
+                "stage": "Limitation 2",
+                "content": (
+                    "Existing ideation pipelines usually separate literature retrieval from claim validation, so challenged "
+                    "or sample-limited observations can enter the report body as if they were verified synthesis."
+                ),
+            },
+            {
+                "stage": "Limitation 3",
+                "content": (
+                    "Early research reports often lack an explicit falsification interface: they suggest ideas without "
+                    "hard-negative evidence, failure criteria, or negative-result logging plans."
+                ),
+            },
+            {
+                "stage": "Key Idea / Our Goal",
+                "content": (
+                    "ScholarInsight turns research ideation into an auditable evidence pipeline in which a report-body "
+                    "claim must pass source-role grounding, formal evidence certification, hard-negative audit, and "
+                    "falsification planning before it is presented as a research direction."
+                ),
+            },
+            {
+                "stage": "Challenge 1",
+                "content": (
+                    "Source drift: retrieval must distinguish core papers, adjacent papers, rejected papers, and "
+                    "hard-negative boundary sources across heterogeneous topic families."
+                ),
+            },
+            {
+                "stage": "Challenge 2",
+                "content": (
+                    "Claim overreach: the system must prevent single-paper or sample-limited observations from becoming "
+                    "general research claims while still preserving them as backlog evidence."
+                ),
+            },
+            {
+                "stage": "Challenge 3",
+                "content": (
+                    "Falsifiability: a generated research direction must carry conditions under which it should be "
+                    "weakened, rejected, or moved back to evidence collection."
+                ),
+            },
+            {
+                "stage": "Methodology topic sentence",
+                "content": (
+                    "ScholarInsight is a source-role-aware ideation pipeline with formal claim gating, hard-negative "
+                    "boundary audit, and falsification-aware report rendering."
+                ),
+            },
+            {
+                "stage": "Module A (addresses Challenge 1)",
+                "content": (
+                    "Source-role retrieval and reranking combine embedding search, cross-encoder reranking, "
+                    "topic-family source classifiers, and rejected-source audit records."
+                ),
+            },
+            {
+                "stage": "Module B (addresses Challenge 2)",
+                "content": (
+                    "Evidence-to-claim gate g(c) requires verified synthesis, multi-evidence support, independent papers, "
+                    "reportable source roles, and backlog separation before report-body inclusion."
+                ),
+            },
+            {
+                "stage": "Module C (addresses Challenge 3)",
+                "content": (
+                    "Hard-negative and falsification interface h(c) links report-ready claims to boundary sources, failure "
+                    "criteria, benchmark perturbations, and negative-result logging schema."
+                ),
+            },
+            {
+                "stage": "Contribution 1",
+                "content": (
+                    "A problem framing and pipeline for auditable, falsifiable literature-grounded research ideation "
+                    "(Sections 1-3)."
+                ),
+            },
+            {
+                "stage": "Contribution 2",
+                "content": (
+                    "A source-role-aware evidence and claim certification mechanism, including g(c) and h(c), that separates "
+                    "report-ready claims from backlog observations (Section 3)."
+                ),
+            },
+            {
+                "stage": "Contribution 3",
+                "content": (
+                    "A pilot evaluation over five topic families with fresh CUDA reruns, freeze validation, structural "
+                    "ablation, and runtime source-stage ablation (Section 4)."
+                ),
+            },
+            {
+                "stage": "Contribution 4",
+                "content": (
+                    "A report artifact design that exposes evidence certificates, rejected-source boundaries, and "
+                    "falsification plans for advisor or human review (Sections 3-5)."
+                ),
+            },
+        ],
+        "methodology_outline": [
+            {
+                "section": "3.1 Source-role retrieval and boundary source tracking",
+                "summary": "Describe embedding retrieval, reranker use, topic-family source roles, accepted/rejected sources, and why rejected sources remain useful for counterexample audit.",
+            },
+            {
+                "section": "3.2 Evidence clusters and formal claim gate g(c)",
+                "summary": "Define evidence clusters, reportable source roles, independent-paper support, and the exact conditions for g(c)=1.",
+            },
+            {
+                "section": "3.3 Hard-negative audit and report certificate h(c)",
+                "summary": "Define counterexample coverage, falsification plans, benchmark perturbations, and negative-result logging.",
+            },
+            {
+                "section": "3.4 Report rendering and advisor-facing artifacts",
+                "summary": "Explain report-ready findings, audit-only backlog, mentor packets, validation metadata, and what the system deliberately does not claim.",
+            },
+        ],
+        "self_consistency_checks": {
+            "limitations_to_key_idea": "pass",
+            "key_idea_to_challenges": "pass",
+            "challenges_to_methodology": "pass",
+            "methodology_to_contributions": "pass",
+        },
+        "severity_summary": "0 CRITICAL, 0 MAJOR, 1 MINOR: novelty/usefulness still requires human or blind strong-model review.",
+    }
+
+
 def render_markdown(packet: dict[str, Any]) -> str:
     lines = [
         "# ScholarInsight Paper Experiment Packet",
@@ -206,6 +357,39 @@ def render_markdown(packet: dict[str, Any]) -> str:
             "",
             f"Unsafe claim to avoid: {gate['paper_unsafe_claim']}",
             "",
+            "## Paper Logic Skeleton",
+            "",
+            f"- Type: {packet['paper_skeleton']['paper_type']}",
+            f"- Rationale: {packet['paper_skeleton']['positioning_rationale']}",
+            "",
+            "| Stage | Content |",
+            "|---|---|",
+        ]
+    )
+    for row in packet["paper_skeleton"]["thinking_template"]:
+        lines.append(f"| {row['stage']} | {row['content']} |")
+    lines.extend(
+        [
+            "",
+            "### Methodology Outline",
+            "",
+        ]
+    )
+    for item in packet["paper_skeleton"]["methodology_outline"]:
+        lines.append(f"- **{item['section']}**: {item['summary']}")
+    lines.extend(
+        [
+            "",
+            "### Self-consistency Checks",
+            "",
+        ]
+    )
+    for name, status in packet["paper_skeleton"]["self_consistency_checks"].items():
+        lines.append(f"- {name}: {status}")
+    lines.extend(
+        [
+            f"- Severity summary: {packet['paper_skeleton']['severity_summary']}",
+            "",
             "## Remaining Non-mechanical Gap",
             "",
             "Human or strong-model blind review is still required for novelty, usefulness, feasibility, and writing quality. The current evaluator measures structural evidence quality only.",
@@ -234,6 +418,7 @@ def main() -> None:
         "structural_ablation_summary": structural_delta_summary(structural.get("items") or []),
         "runtime_ablation_summary": runtime_delta_summary(runtime.get("items") or []),
         "formal_gate": formal_gate_note(),
+        "paper_skeleton": paper_skeleton_note(),
     }
     output_dir = Path(args.output_dir) if args.output_dir else fresh_root / "paper_experiment_packet"
     output_dir.mkdir(parents=True, exist_ok=True)
