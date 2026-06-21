@@ -152,3 +152,16 @@ def test_structural_ablation_drops_falsification_score(tmp_path: Path) -> None:
 
     assert by_variant["full"]["overall_score"] > by_variant["minus_falsification"]["overall_score"]
     assert "missing_falsification_plan" in by_variant["minus_falsification"]["flags"]
+
+
+def test_runtime_ablation_table_reads_baseline_and_renders(tmp_path: Path) -> None:
+    runtime_ablation = _script_module("runtime_ablation_table")
+    artifact = _fresh_artifact(tmp_path / "baseline")
+
+    rows = runtime_ablation.baseline_rows(artifact.parent)
+    rendered = runtime_ablation.render_markdown(rows)
+
+    assert rows[0]["variant"] == "full"
+    assert rows[0]["topic_id"] == "004"
+    assert "Runtime Ablation Table" in rendered
+    assert "RAG with Knowledge Graphs" in rendered
