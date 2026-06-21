@@ -368,6 +368,11 @@ async def audit_topic(
         },
         "counterexample_audit": [row.model_dump(mode="json") for row in counterexample_audit],
         "falsification_plan": [row.model_dump(mode="json") for row in falsification_plan],
+        "selected_sources": [source_row(item) for item in selected],
+        "accepted_sources": [source_row(item) for item in accepted],
+        "rejected_sources": [source_row(item) for item in rejected],
+        "documents": [document.model_dump(mode="json") for document in documents],
+        "evidence": [ev.model_dump(mode="json") for ev in evidence],
         "claims": [claim_row(claim) for claim in claims],
         "clusters": [cluster.model_dump(mode="json") for cluster in clusters],
     }
