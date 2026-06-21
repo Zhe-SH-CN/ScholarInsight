@@ -23,11 +23,11 @@ LLM-assisted research ideation can produce fluent reports that appear useful whi
 
 ## 1 Introduction
 
-LLM systems are increasingly used to read papers, summarize fields, and propose research directions. The consequential use case is not merely text generation. It is an advisor-facing workflow in which a researcher decides which directions deserve further reading, implementation, or experiments. In this setting, a fluent but weakly grounded suggestion can waste substantial time because the failure is often hidden inside source selection and claim synthesis.
+LLM systems are increasingly used to read papers, summarize fields, and propose research directions [@baek2024researchagent; @lu2024aiscientist; @si2024novelideas]. The consequential use case is not merely text generation. It is an advisor-facing workflow in which a researcher decides which directions deserve further reading, implementation, or experiments. In this setting, a fluent but weakly grounded suggestion can waste substantial time because the failure is often hidden inside source selection and claim synthesis.
 
-A recurring failure mode is source drift. For example, a researcher asking for a research direction on retrieval-augmented generation with knowledge graphs may receive a report that mixes core KG-RAG methods with knowledge-graph construction, KGQA, and graph-reasoning neighbors. These papers can be topically related, but they should not all support the same claim. A useful ideation system should expose which sources are core support, which sources are adjacent, and which rejected sources are useful as hard-negative boundaries.
+A recurring failure mode is source drift. For example, a researcher asking for a research direction on retrieval-augmented generation with knowledge graphs may receive a report that mixes core KG-RAG methods with knowledge-graph construction, KGQA, and graph-reasoning neighbors. RAG grounds generation in retrieved evidence [@lewis2020rag; @gao2023ragsurvey], but topical retrieval is not the same as source-role support. A useful ideation system should expose which sources are core support, which sources are adjacent, and which rejected sources are useful as hard-negative boundaries.
 
-Existing LLM and retrieval workflows do not fully solve this problem. Retrieval-oriented systems often optimize for topical match rather than source role. Claim generators often turn sample-limited or single-paper observations into broad synthesis. Report writers often omit the conditions under which a claim should be weakened or falsified. These omissions are especially harmful for early research reports because the reader needs to judge whether an idea is worth testing, not only whether the prose is plausible. [Citations needed: LLM-for-research systems, RAG survey, LLM-as-judge or verification work.]
+Existing LLM and retrieval workflows do not fully solve this problem. Retrieval-oriented systems often optimize for topical match rather than source role [@lewis2020rag; @gao2023ragsurvey; @asai2023selfrag]. Claim generators often turn sample-limited or single-paper observations into broad synthesis. Report writers often omit the conditions under which a claim should be weakened or falsified. LLM-as-judge and factuality methods provide useful evaluation signals, but they also leave open questions about bias, atomic support, and expert review [@liu2023geval; @zheng2023judge; @manakul2023selfcheckgpt; @min2023factscore]. These omissions are especially harmful for early research reports because the reader needs to judge whether an idea is worth testing, not only whether the prose is plausible.
 
 Our goal is to make literature-grounded research ideation auditable and falsifiable. ScholarInsight requires every report-body research claim to carry an evidence certificate, source-role boundary, hard-negative audit, and falsification plan. The key distinction is between report-ready claims, which enter the main report body, and audit-only backlog observations, which remain inspectable but are not presented as conclusions.
 
@@ -39,11 +39,11 @@ This draft makes four contributions. First, it formulates auditable and falsifia
 
 ## 2 Related Work
 
-LLM-assisted research systems aim to help researchers summarize literature, generate hypotheses, or plan experiments. These systems make research workflows more interactive, but they can also obscure whether a generated direction is grounded in the right sources. ScholarInsight differs by treating the generated report as an auditable artifact. The central question is not whether the report is fluent, but whether each report-body claim exposes source roles, evidence support, and falsification conditions. [Citations needed.]
+LLM-assisted research systems aim to help researchers summarize literature, generate hypotheses, or plan experiments [@baek2024researchagent; @lu2024aiscientist]. Large-scale human evaluation of LLM-generated research ideas suggests both promise and unresolved limits, including weaker feasibility and unreliable self-evaluation [@si2024novelideas]. ScholarInsight differs by treating the generated report as an auditable artifact. The central question is not whether the report is fluent, but whether each report-body claim exposes source roles, evidence support, and falsification conditions.
 
-Retrieval-augmented generation connects generation to external documents, but standard retrieval scores do not by themselves decide how a source should function in a research argument. A paper can be close in embedding space while serving as an adjacent application, a benchmark, a rejected boundary, or a hard negative. ScholarInsight therefore keeps rejected sources and source-role labels as first-class audit data rather than discarding them after top-k selection. [Citations needed.]
+Retrieval-augmented generation connects generation to external documents, but standard retrieval scores do not by themselves decide how a source should function in a research argument [@lewis2020rag; @gao2023ragsurvey]. Self-reflective retrieval methods show that systems can condition retrieval and generation on critique signals [@asai2023selfrag], but ScholarInsight moves the control point to the report artifact: a paper can be close in embedding space while serving as an adjacent application, a benchmark, a rejected boundary, or a hard negative. The pipeline therefore keeps rejected sources and source-role labels as first-class audit data rather than discarding them after top-k selection.
 
-Verification and LLM-as-judge work has studied factuality, consistency, and rubric-based assessment. ScholarInsight is complementary because it moves verification into the evidence-to-claim interface. The gate g(c) decides whether a claim can appear in the report body, while h(c) adds counterexample coverage and falsification planning. This makes the artifact inspectable even when the final novelty and usefulness judgment remains human.
+Verification and LLM-as-judge work has studied factuality, consistency, and rubric-based assessment [@liu2023geval; @zheng2023judge; @manakul2023selfcheckgpt; @min2023factscore]. ScholarInsight is complementary because it moves verification into the evidence-to-claim interface. The gate g(c) decides whether a claim can appear in the report body, while h(c) adds counterexample coverage and falsification planning. This makes the artifact inspectable even when the final novelty and usefulness judgment remains human.
 
 ## 3 Method
 
@@ -181,8 +181,18 @@ ScholarInsight provides a source-role-aware pipeline for auditable and falsifiab
 - The evaluator is a structural quality proxy, not a substitute for expert review.
 - The ablation package combines artifact-masked structural ablation with deterministic source-stage runtime ablation; it is not yet a full end-to-end randomized experiment.
 - The current evidence does not establish novelty, feasibility, or publication quality.
-- Replace citation placeholders with verified references before any submission.
+- Verify and expand the reference seed list before any submission.
+- Convert Markdown citation keys to AAAI LaTeX citation commands when moving to the final paper source.
 - Decide whether the target format is AAAI full paper, workshop paper, or internal advisor packet before final rewriting.
+
+## Reference Seed
+
+BibTeX seed file: `docs/paper/references.bib`.
+
+- LLM-assisted research ideation and scientific agents: @baek2024researchagent, @lu2024aiscientist, @si2024novelideas.
+- Retrieval-augmented and self-reflective generation: @lewis2020rag, @gao2023ragsurvey, @asai2023selfrag.
+- LLM-as-judge, factuality, and atomic support evaluation: @liu2023geval, @zheng2023judge, @manakul2023selfcheckgpt, @min2023factscore.
+- This seed list is not a final Related Work. It should be expanded after the advisor chooses the target paper framing.
 
 ## Why This Structure
 

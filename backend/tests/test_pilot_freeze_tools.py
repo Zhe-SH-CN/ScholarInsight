@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 
@@ -270,5 +271,12 @@ def test_paper_manuscript_draft_keeps_safe_boundaries() -> None:
     assert "does not prove truth, novelty, or publishability" in rendered
     assert "| 004 RAG with Knowledge Graphs | 0.986" in rendered
     assert "human or strong-model novelty review" in rendered
+    assert "Citations needed" not in rendered
     forbidden_overclaim = "automatically generates" + " AAAI-quality ideas"
     assert forbidden_overclaim not in rendered
+
+    bib = Path(__file__).resolve().parents[2] / "docs" / "paper" / "references.bib"
+    bib_keys = set(re.findall(r"@\w+\{([^,]+),", bib.read_text(encoding="utf-8")))
+    rendered_keys = set(re.findall(r"@([A-Za-z0-9_:-]+)", rendered))
+    assert rendered_keys
+    assert rendered_keys <= bib_keys
