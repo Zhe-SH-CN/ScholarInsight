@@ -226,3 +226,49 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     assert "Experiment Section Draft" in rendered
     forbidden_overclaim = "automatically generates" + " AAAI-quality ideas"
     assert forbidden_overclaim not in rendered
+
+
+def test_paper_manuscript_draft_keeps_safe_boundaries() -> None:
+    packet_script = _script_module("paper_experiment_packet")
+    manuscript = _script_module("paper_manuscript_draft")
+
+    paper_packet = {
+        "fresh_pilot": [
+            {
+                "topic_id": "004",
+                "topic": "RAG with Knowledge Graphs",
+                "passed": True,
+                "score": 0.986,
+                "accepted_count": 20,
+                "evidence_count": 83,
+                "claim_count": 37,
+                "report_ready_count": 4,
+                "falsification_plan_count": 4,
+                "reranker_device": "cuda:0",
+            }
+        ],
+        "structural_ablation_summary": [
+            {"variant": "minus_claim_gate", "mean_delta": -0.165, "min_delta": -0.2, "max_delta": -0.12, "topic_count": 1},
+            {"variant": "minus_hard_negative", "mean_delta": -0.125, "min_delta": -0.13, "max_delta": -0.12, "topic_count": 1},
+            {"variant": "minus_falsification", "mean_delta": -0.092, "min_delta": -0.1, "max_delta": -0.08, "topic_count": 1},
+        ],
+        "runtime_ablation_summary": [
+            {"variant": "no_reranker", "mean_score_delta": -0.011, "mean_report_ready_delta": -0.4, "flags": []},
+            {"variant": "no_source_gate", "mean_score_delta": -0.1, "mean_report_ready_delta": 0.0, "flags": ["missing_counterexample_audit"]},
+        ],
+        "formal_gate": packet_script.formal_gate_note(),
+        "method_section_draft": packet_script.method_section_draft_note(),
+        "experiment_section_draft": packet_script.experiment_section_draft_note(),
+    }
+
+    rendered = manuscript.render_markdown(paper_packet)
+
+    assert "ScholarInsight: Auditable and Falsifiable Literature-Grounded Research Ideation" in rendered
+    assert "Proposition 1" in rendered
+    assert "g(c)" in rendered
+    assert "h(c)" in rendered
+    assert "does not prove truth, novelty, or publishability" in rendered
+    assert "| 004 RAG with Knowledge Graphs | 0.986" in rendered
+    assert "human or strong-model novelty review" in rendered
+    forbidden_overclaim = "automatically generates" + " AAAI-quality ideas"
+    assert forbidden_overclaim not in rendered
