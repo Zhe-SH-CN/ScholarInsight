@@ -29,8 +29,8 @@ PROTOCOL = {
     "evidence_grounding": [
         "claims bind concrete supporting evidence ids",
         "strong multi-paper/report-ready support is present",
-        "evidence appendix or structured evidence artifacts are available",
-        "report uses explicit citations rather than unsupported prose",
+        "evidence appendix or structured evidence artifacts are available and cleanly rendered",
+        "report body uses explicit citations rather than relying on appendix-only citation density",
     ],
     "claim_validity": [
         "verified, low-risk claims dominate the usable claim set",
@@ -105,15 +105,18 @@ def read_text(path: Path) -> str:
 def load_artifact_dir(path: Path, label: str) -> dict[str, Any]:
     exports = path / "exports"
     reports = path / "reports"
-    report_text = "\n\n".join(
+    report_md = read_text(reports / "report.md")
+    report_body_text, evidence_appendix_text = split_evidence_appendix(report_md)
+    report_body_text = "\n\n".join(
         text
         for text in [
-            read_text(reports / "report.md"),
+            report_body_text,
             read_text(reports / "executive_summary.md"),
             read_text(reports / "methodology.md"),
         ]
         if text
     )
+    report_text = "\n\n".join(text for text in [report_body_text, evidence_appendix_text] if text)
     if (exports / "claims.json").exists():
         claims = read_json(exports / "claims.json")
     else:
@@ -123,6 +126,8 @@ def load_artifact_dir(path: Path, label: str) -> dict[str, Any]:
         "path": str(path),
         "kind": "artifact_dir",
         "report_text": report_text,
+        "report_body_text": report_body_text,
+        "evidence_appendix_text": evidence_appendix_text,
         "claims": claims,
         "counterexample_audit": read_json(exports / "counterexample_audit.json")
         if (exports / "counterexample_audit.json").exists()
@@ -157,6 +162,8 @@ def load_audit_json(path: Path, label_prefix: str) -> list[dict[str, Any]]:
             "path": f"{path}#{topic_id}",
             "kind": "local_quality_audit_topic",
             "report_text": "",
+            "report_body_text": "",
+            "evidence_appendix_text": "",
             "claims": claims,
             "counterexample_audit": topic.get("counterexample_audit") or [],
             "falsification_plan": topic.get("falsification_plan") or [],
@@ -184,6 +191,14 @@ def count_files(path: Path, pattern: str) -> int:
     return sum(1 for item in path.glob(pattern) if item.is_file())
 
 
+def split_evidence_appendix(report_text: str) -> tuple[str, str]:
+    marker = "## Evidence 附录"
+    if marker not in report_text:
+        return report_text, ""
+    body, appendix = report_text.split(marker, 1)
+    return body.rstrip(), f"{marker}{appendix}".strip()
+
+
 def evaluate_loaded(data: dict[str, Any]) -> dict[str, Any]:
     claims = normalize_list(data.get("claims"))
     counterexamples = normalize_list(data.get("counterexample_audit"))
@@ -192,6 +207,8 @@ def evaluate_loaded(data: dict[str, Any]) -> dict[str, Any]:
     matrix = data.get("matrix") or {}
     summary = data.get("summary") or {}
     report_text = data.get("report_text") or ""
+    report_body_text = data.get("report_body_text") or report_text
+    evidence_appendix_text = data.get("evidence_appendix_text") or ""
 
     metrics = collect_metrics(
         claims=claims,
@@ -201,11 +218,13 @@ def evaluate_loaded(data: dict[str, Any]) -> dict[str, Any]:
         matrix=matrix,
         summary=summary,
         report_text=report_text,
+        report_body_text=report_body_text,
+        evidence_appendix_text=evidence_appendix_text,
         evidence_file_count=int(data.get("evidence_file_count") or 0),
         source_file_count=int(data.get("source_file_count") or 0),
         recommendations=normalize_list(data.get("recommendations")),
     )
-    scores = score_metrics(metrics, report_text)
+    scores = score_metrics(metrics)
     overall = clamp(sum(scores.values()) / len(QUALITY_DIMENSIONS))
     flags = flags_for(metrics, scores)
     return {
@@ -236,6 +255,8 @@ def collect_metrics(
     matrix: dict[str, Any],
     summary: dict[str, Any],
     report_text: str,
+    report_body_text: str,
+    evidence_appendix_text: str,
     evidence_file_count: int,
     source_file_count: int,
     recommendations: list[dict[str, Any]],
@@ -280,7 +301,11 @@ def collect_metrics(
     source_subtypes.update({k: int(v or 0) for k, v in accepted_subtypes.items()})
 
     citations = re.findall(r"\[[0-9]+\]", report_text)
+    body_citations = re.findall(r"\[[0-9]+\]", report_body_text)
+    appendix_citations = re.findall(r"\[[0-9]+\]", evidence_appendix_text)
     words = re.findall(r"\S+", report_text)
+    body_words = re.findall(r"\S+", report_body_text)
+    appendix_words = re.findall(r"\S+", evidence_appendix_text)
     bad_reference_count = count_bad_references(report_text, matrix)
     reference_count = max(1, len(re.findall(r"^\[[0-9]+\]", report_text, flags=re.MULTILINE)))
     counterexample_visible = len([row for row in counterexamples if row.get("report_visible", True)])
@@ -327,8 +352,18 @@ def collect_metrics(
         "observability_report_confidence": float(observability.get("report_confidence") or 0),
         "observability_evidence_coverage": float(observability.get("evidence_coverage_score") or 0),
         "citation_count": len(citations),
+        "body_citation_count": len(body_citations),
+        "appendix_citation_count": len(appendix_citations),
         "word_count": len(words),
+        "body_word_count": len(body_words),
+        "appendix_word_count": len(appendix_words),
         "citation_density_per_1000_words": round(1000 * len(citations) / max(1, len(words)), 3),
+        "body_citation_density_per_1000_words": round(1000 * len(body_citations) / max(1, len(body_words)), 3),
+        "appendix_citation_density_per_1000_words": round(1000 * len(appendix_citations) / max(1, len(appendix_words)), 3),
+        "evidence_appendix_present": bool(evidence_appendix_text.strip()),
+        "mechanical_appendix_fact_prefix_count": len(
+            re.findall(r"相关论文文本中出现了可核验表述", evidence_appendix_text)
+        ),
         "bad_reference_count": bad_reference_count,
         "bad_reference_ratio": round(bad_reference_count / reference_count, 3),
         "quality_flags": sorted(quality_flags),
@@ -339,13 +374,13 @@ def collect_metrics(
         ),
         "cross_role_claim_count": len([claim for claim in claims if claim.get("claim_type") == "cross_role_contrast"]),
         "recommendation_next_step_count": next_steps,
-        "has_formal_gate_text": structured_formal_gate or contains_any(report_text, ["g(c)", "evidence_certificate", "形式化证据门控"]),
-        "has_falsification_text": bool(falsification) or contains_any(report_text, ["falsification", "可证伪", "推翻条件", "scope_narrowing"]),
-        "has_negative_logging_text": structured_negative_logging or contains_any(report_text, ["failure_observation", "negative-result", "负结果记录"]),
-        "has_hypothesis_text": contains_any(report_text, ["研究假设", "hypothesis", "实验化验证"]),
-        "has_benchmark_text": structured_benchmark or contains_any(report_text, ["benchmark", "任务切片", "task perturbation", "评测协议"]),
-        "has_backlog_separation_text": contains_any(report_text, ["待验证观察", "backlog", "audit-only", "暂不进入主结论"]),
-        "has_problem_boundary_text": contains_any(report_text, ["问题定义", "边界条件", "scope", "贡献边界"]),
+        "has_formal_gate_text": structured_formal_gate or contains_any(report_body_text, ["g(c)", "evidence_certificate", "形式化证据门控"]),
+        "has_falsification_text": bool(falsification) or contains_any(report_body_text, ["falsification", "可证伪", "推翻条件", "scope_narrowing"]),
+        "has_negative_logging_text": structured_negative_logging or contains_any(report_body_text, ["failure_observation", "negative-result", "负结果记录"]),
+        "has_hypothesis_text": contains_any(report_body_text, ["研究假设", "hypothesis", "实验化验证"]),
+        "has_benchmark_text": structured_benchmark or contains_any(report_body_text, ["benchmark", "任务切片", "task perturbation", "评测协议"]),
+        "has_backlog_separation_text": contains_any(report_body_text, ["待验证观察", "backlog", "audit-only", "暂不进入主结论"]),
+        "has_problem_boundary_text": contains_any(report_body_text, ["问题定义", "边界条件", "scope", "贡献边界"]),
     }
 
 
@@ -375,7 +410,7 @@ def is_bad_reference(text: str) -> bool:
     return any(pattern.search(stripped) for pattern in BAD_REFERENCE_PATTERNS)
 
 
-def score_metrics(metrics: dict[str, Any], report_text: str) -> dict[str, float]:
+def score_metrics(metrics: dict[str, Any]) -> dict[str, float]:
     source_relevance = 0.0
     source_relevance += 0.25 if metrics["source_role_count"] > 0 else 0.0
     source_relevance += 0.25 if metrics["counterexample_count"] > 0 else 0.0
@@ -385,8 +420,8 @@ def score_metrics(metrics: dict[str, Any], report_text: str) -> dict[str, float]
     evidence_grounding = 0.0
     evidence_grounding += 0.30 * ratio(metrics["supported_claim_count"], metrics["claim_count"])
     evidence_grounding += 0.30 * ratio(metrics["strong_support_claim_count"], max(1, metrics["claim_count"]))
-    evidence_grounding += 0.20 if metrics["evidence_file_count"] > 0 or "Evidence 附录" in report_text else 0.0
-    evidence_grounding += 0.20 * min(1.0, metrics["citation_density_per_1000_words"] / 12)
+    evidence_grounding += 0.20 if metrics["evidence_file_count"] > 0 or metrics["evidence_appendix_present"] else 0.0
+    evidence_grounding += 0.20 * min(1.0, metrics["body_citation_density_per_1000_words"] / 12)
 
     claim_validity = 0.0
     claim_validity += 0.40 * ratio(metrics["low_risk_verified_claim_count"], metrics["claim_count"])
@@ -441,6 +476,10 @@ def flags_for(metrics: dict[str, Any], scores: dict[str, float]) -> list[str]:
             flags.append(f"low_{name}")
     if metrics["bad_reference_ratio"] > 0.1:
         flags.append("metadata_reference_noise")
+    if metrics["mechanical_appendix_fact_prefix_count"] > 0:
+        flags.append("mechanical_appendix_fact_prefix")
+    if metrics["appendix_citation_count"] > metrics["body_citation_count"] * 3 and metrics["body_citation_count"] < 4:
+        flags.append("appendix_heavy_citation_dependency")
     if metrics["falsification_plan_count"] == 0:
         flags.append("missing_falsification_plan")
     if metrics["counterexample_count"] == 0:
@@ -458,6 +497,8 @@ def verdict(score: float, flags: list[str] | None = None) -> str:
         "missing_falsification_plan",
         "no_report_ready_claims",
         "high_risk_claims_dominate",
+        "mechanical_appendix_fact_prefix",
+        "appendix_heavy_citation_dependency",
     }
     has_hard_revision_flag = bool(hard_revision_flags & set(flags))
     if score >= 0.75:
