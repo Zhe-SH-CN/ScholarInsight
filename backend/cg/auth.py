@@ -64,7 +64,7 @@ def session_user_from_request(request: Request, settings: Settings | None = None
     return parse_session_token(request.cookies.get(settings.cg_auth_cookie_name), settings)
 
 
-def require_session_user(request: Request) -> str:
+async def require_session_user(request: Request) -> str:
     username = session_user_from_request(request)
     if not username:
         raise HTTPException(
@@ -90,4 +90,3 @@ def set_session_cookie(response: Response, username: str, settings: Settings | N
 def clear_session_cookie(response: Response, settings: Settings | None = None) -> None:
     settings = settings or get_settings()
     response.delete_cookie(key=settings.cg_auth_cookie_name, path="/", samesite="lax")
-

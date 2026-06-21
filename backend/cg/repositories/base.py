@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import aiofiles
 import orjson
 from pydantic import BaseModel
 
@@ -25,30 +24,28 @@ async def atomic_write_json(path: Path, data: Any) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    async with aiofiles.open(tmp, "wb") as f:
-        await f.write(orjson.dumps(to_jsonable(data), option=orjson.OPT_INDENT_2))
+    tmp.write_bytes(orjson.dumps(to_jsonable(data), option=orjson.OPT_INDENT_2))
     tmp.replace(path)
 
 
 async def read_json(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
-    async with aiofiles.open(path, "rb") as f:
-        return orjson.loads(await f.read())
+    return orjson.loads(path.read_bytes())
 
 
 async def append_jsonl(path: Path, row: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiofiles.open(path, "ab") as f:
-        await f.write(orjson.dumps(to_jsonable(row)) + b"\n")
+    with path.open("ab") as f:
+        f.write(orjson.dumps(to_jsonable(row)) + b"\n")
 
 
 async def read_jsonl(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     rows: list[dict[str, Any]] = []
-    async with aiofiles.open(path, "rb") as f:
-        async for line in f:
+    with path.open("rb") as f:
+        for line in f:
             if line.strip():
                 rows.append(orjson.loads(line))
     return rows
@@ -56,13 +53,10 @@ async def read_jsonl(path: Path) -> list[dict[str, Any]]:
 
 async def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    async with aiofiles.open(path, "w", encoding="utf-8") as f:
-        await f.write(content)
+    path.write_text(content, encoding="utf-8")
 
 
 async def read_text(path: Path, default: str = "") -> str:
     if not path.exists():
         return default
-    async with aiofiles.open(path, "r", encoding="utf-8") as f:
-        return await f.read()
-
+    return path.read_text(encoding="utf-8")

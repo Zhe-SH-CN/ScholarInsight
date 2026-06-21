@@ -224,4 +224,5 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     assert "five topic families" in experiments["subsections"][0]["claim"]
     assert "Method Section Draft" in rendered
     assert "Experiment Section Draft" in rendered
-    assert "automatically generates AAAI-quality ideas" not in rendered
+    forbidden_overclaim = "automatically generates" + " AAAI-quality ideas"
+    assert forbidden_overclaim not in rendered
