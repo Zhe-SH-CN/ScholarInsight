@@ -188,6 +188,7 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     )
     gate = packet.formal_gate_note()
     skeleton = packet.paper_skeleton_note()
+    intro = packet.introduction_outline_note()
 
     assert structural == [
         {"variant": "minus_gate", "mean_delta": -0.175, "min_delta": -0.2, "max_delta": -0.15, "topic_count": 2}
@@ -199,3 +200,6 @@ def test_paper_experiment_packet_summarizes_deltas() -> None:
     assert "not a guarantee" in " ".join(gate["guarantee"])
     assert skeleton["paper_type"] == "New Problem/Setting paper with a technique contribution"
     assert all(status == "pass" for status in skeleton["self_consistency_checks"].values())
+    assert intro["type_positioning"]["type"] == "New Problem/Setting Paper"
+    assert intro["flowchart_consistency"]["running_example_loop"] == "pass"
+    assert len(intro["paragraphs"][-1]["contributions"]) == 4
