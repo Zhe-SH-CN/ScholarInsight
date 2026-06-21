@@ -747,6 +747,41 @@ def test_report_ready_representative_evidence_uses_axis_summary() -> None:
     assert "相关论文文本中出现了可核验表述" not in body
 
 
+def test_evidence_appendix_cleans_mechanical_fact_prefix() -> None:
+    request = ResearchRequest(
+        project_name="Evidence appendix cleanup regression",
+        target_topic="Counterfactual Inference",
+        analysis_dimensions=["core_counterfactual_inference"],
+    )
+    evidence = [
+        _evidence_for_report_ready("ev_ready_1", "Paper A").model_copy(
+            update={
+                "fact": (
+                    "Paper A 在核心反事实推断相关论文文本中出现了可核验表述："
+                    "identifiability assumptions are evaluated through a shared protocol"
+                ),
+                "quote": "identifiability assumptions are evaluated through a shared protocol",
+            }
+        ),
+        _evidence_for_report_ready("ev_ready_2", "Paper B"),
+        _evidence_for_report_ready("ev_ready_3", "Paper C"),
+        _evidence_for_report_ready("ev_ready_4", "Paper D"),
+    ]
+    report = pipeline_module.build_analysis_report(
+        request,
+        evidence,
+        [_report_ready_claim()],
+        RunMetrics(sources_fetched=4, evidence_count=4, claim_count=1, verified_claim_count=1),
+        _matrix_for_report_ready(),
+        [],
+        _observability(),
+    )
+
+    appendix = report.split("## Evidence 附录", 1)[1]
+    assert "相关论文文本中出现了可核验表述" not in appendix
+    assert "identifiability assumptions are evaluated through a shared protocol" in appendix
+
+
 def test_report_ready_representative_evidence_filters_ocr_fragments() -> None:
     request = ResearchRequest(
         project_name="Representative OCR cleanup regression",

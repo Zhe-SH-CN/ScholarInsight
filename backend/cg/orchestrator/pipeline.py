@@ -4265,13 +4265,15 @@ def build_analysis_report(
     )
     for ev in evidence[:80]:
         cite = citations_for_ids([ev.evidence_id], citation_numbers)
+        fact_text = appendix_evidence_text(ev, ev.fact)
+        quote_text = appendix_evidence_text(ev, ev.quote)
         lines.extend(
             [
                 f"### {ev.evidence_id} {cite} · {ev.dimension_label}",
                 "",
                 f"- 论文：{ev.paper or '未识别'}",
-                f"- 事实：{ev.fact}",
-                f"- 原文片段：{ev.quote}",
+                f"- 事实：{fact_text}",
+                f"- 原文片段：{quote_text}",
                 "",
             ]
         )
@@ -4447,6 +4449,13 @@ def report_evidence_snippet(item: Evidence, max_len: int = 92) -> str:
         cleaned = clean_report_evidence_text(item, text)
         if cleaned and not is_low_quality_report_snippet(cleaned):
             return compact_fact(cleaned, max_len)
+    return report_evidence_fallback_phrase(item, max_len)
+
+
+def appendix_evidence_text(item: Evidence, text: str, max_len: int = 240) -> str:
+    cleaned = clean_report_evidence_text(item, text)
+    if cleaned and not is_low_quality_report_snippet(cleaned):
+        return compact_fact(cleaned, max_len)
     return report_evidence_fallback_phrase(item, max_len)
 
 
